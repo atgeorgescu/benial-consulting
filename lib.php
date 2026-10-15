@@ -14,7 +14,8 @@ function db(): PDO {
         $port = $p['port'] ?? ($drv === 'mysql' ? 3306 : 5432);
         $dsn = "$drv:host={$p['host']};port=$port;dbname=" . ltrim($p['path'], '/');
         if ($drv === 'mysql') $dsn .= ';charset=utf8mb4';
-        $pdo = new PDO($dsn, urldecode($p['user'] ?? ''), urldecode($p['pass'] ?? ''));
+        $pdo = new PDO($dsn, urldecode($p['user'] ?? ''), urldecode($p['pass'] ?? ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        if ($drv === 'pgsql' && ($sch = getenv('DB_SCHEMA')) && preg_match('/^[a-z_][a-z0-9_]*$/', $sch)) { $pdo->exec("CREATE SCHEMA IF NOT EXISTS $sch"); $pdo->exec("SET search_path TO $sch"); }
     } else {
         $pdo = new PDO('sqlite:' . (getenv('SQLITE_PATH') ?: __DIR__ . '/data.sqlite'));
     }
