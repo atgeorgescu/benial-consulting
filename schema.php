@@ -28,7 +28,7 @@ function seed(): void {
     $adm = row("SELECT id FROM users WHERE email='admin'");
     if (!$adm) insert('users', ['email' => 'admin', 'name' => 'Super Admin', 'password_hash' => password_hash($pw, PASSWORD_DEFAULT), 'role' => 'superadmin', 'created_at' => $now]);
     elseif (getenv('ADMIN_PASSWORD')) q("UPDATE users SET password_hash=? WHERE email='admin'", [password_hash($pw, PASSWORD_DEFAULT)]);
-    if (val("SELECT COUNT(*) FROM firme")) return;
+    if (getenv('NO_DEMO_SEED') || val("SELECT COUNT(*) FROM firme")) return;
     $f = insert('firme', ['denumire' => 'DEMO CONSTRUCT SRL (date fictive)', 'cui' => 'RO00000000', 'reg_com' => 'J29/0000/2026', 'caen' => '4120', 'adresa' => 'Str. Exemplului nr. 1, Ploiești, Prahova', 'administrator' => 'Ion Exemplu', 'telefon' => '0700 000 000', 'email' => 'demo@example.com', 'contract_nr' => 'DEMO-1', 'contract_data' => today(), 'servicii' => 'SSM, PSI', 'note' => 'Firmă demonstrativă, date fictive.']);
     $p = insert('puncte', ['firma_id' => $f, 'nume' => 'Sediu social', 'adresa' => 'Str. Exemplului nr. 1, Ploiești', 'conducator' => 'Ion Exemplu', 'riscuri' => 'Lucru la înălțime, manipulare manuală']);
     $g = insert('grupe', ['firma_id' => $f, 'nume' => 'Muncitori construcții', 'tip' => 'SSM', 'periodicitate_luni' => 6, 'descriere' => 'Instruire periodică la 6 luni']);
