@@ -45,7 +45,7 @@ function entities(): array {
                 'medical_ultim' => ['Data ultimului examen medical', 'date'], 'medical_aviz' => ['Aviz medical', 'select', 0, fn() => ['Apt' => 'Apt', 'Apt condiționat' => 'Apt condiționat', 'Inapt temporar' => 'Inapt temporar', 'Inapt' => 'Inapt']],
                 'medical_expira' => ['Aviz medicina muncii valabil până la', 'date'],
                 'username' => ['Utilizator portal (opțional)', 'text', 0, 'pentru autentificare cu parolă, în plus față de codul de acces'], 'password' => ['Parolă portal', 'password', 0, 'Lăsați gol pentru a păstra; minim 8 caractere'],
-                'activ' => ['Activ în platformă', 'check'],
+                'email_optout' => ['Fără notificări pe e-mail', 'check'], 'activ' => ['Activ în platformă', 'check'],
             ]],
         'cursuri' => ['title' => 'Cursuri & teste', 'one' => 'curs', 'scope' => null, 'read' => $staff, 'write' => $staff, 'order' => 'titlu',
             'list' => ['titlu', 'domeniu', 'tip', 'durata_min', 'prag_promovare', 'emite_fisa16'],
@@ -83,7 +83,7 @@ function entities(): array {
             'fields' => ['firma_id' => ['Firmă', 'select', 1, $firme], 'audit_id' => ['Audit', 'select', 0, fn() => opts("SELECT au.id, " . cc('f.denumire', 'au.data') . " AS l FROM audituri au JOIN firme f ON f.id=au.firma_id" . (scope_firma() ? ' WHERE au.firma_id=' . scope_firma() : ''), false)], 'descriere' => ['Neconformitate', 'textarea', 1], 'masura' => ['Măsura de remediere', 'textarea'], 'responsabil' => ['Responsabil', 'text'], 'termen' => ['Termen', 'date'], 'status' => ['Stare', 'select', 1, fn() => ['deschisă' => 'deschisă', 'în lucru' => 'în lucru', 'rezolvată' => 'rezolvată']]]],
         'users' => ['title' => 'Utilizatori', 'one' => 'utilizator', 'scope' => null, 'read' => ['superadmin'], 'write' => ['superadmin'], 'order' => 'name',
             'list' => ['name', 'email', 'role', 'firma_id'],
-            'fields' => ['name' => ['Nume', 'text', 1], 'email' => ['Utilizator / e-mail', 'text', 1], 'role' => ['Rol', 'select', 1, fn() => ['superadmin' => 'Super-admin', 'inspector' => 'Inspector SSM', 'client' => 'Administrator client']], 'firma_id' => ['Firmă (doar pentru administrator client)', 'select', 0, $firme], 'password' => ['Parolă nouă', 'password', 0, 'Lăsați gol pentru a păstra parola; minim 8 caractere']]],
+            'fields' => ['name' => ['Nume', 'text', 1], 'email' => ['Utilizator / e-mail', 'text', 1], 'role' => ['Rol', 'select', 1, fn() => ['superadmin' => 'Super-admin', 'inspector' => 'Inspector SSM', 'client' => 'Administrator client']], 'firma_id' => ['Firmă (doar pentru administrator client)', 'select', 0, $firme], 'password' => ['Parolă nouă', 'password', 0, 'Lăsați gol pentru a păstra parola; minim 8 caractere'], 'notif_email' => ['E-mail pentru notificări', 'email'], 'email_optout' => ['Fără notificări pe e-mail', 'check']]],
     ];
 }
 function ent(string $e): array { $E = entities(); if (!isset($E[$e])) { http_response_code(404); exit('Necunoscut'); } return $E[$e] + ['key' => $e]; }

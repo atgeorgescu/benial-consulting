@@ -4,12 +4,15 @@ require __DIR__ . '/../schema.php';
 require __DIR__ . '/../entities.php';
 require __DIR__ . '/../views.php';
 require __DIR__ . '/../ext.php';
-migrate(); migrate_ext();
+require __DIR__ . '/../notify.php';
+require __DIR__ . '/../uploads.php';
+require __DIR__ . '/../ai.php';
+migrate(); migrate_ext(); migrate_notify(); migrate_uploads(); migrate_ai();
 $flag = sys_get_temp_dir() . '/benial_seeded_' . md5((string)getenv('DATABASE_URL') . __DIR__); if (!file_exists($flag)) { seed(); @touch($flag); }
 $r = $_GET['r'] ?? (user() ? (role() === 'angajat' ? 'portal' : 'dashboard') : 'login');
 $post = $_SERVER['REQUEST_METHOD'] === 'POST';
-if ($post && $r !== 'login') check_csrf();
-if (!user() && !in_array($r, ['login'])) redirect(url('login'));
+if ($post && !in_array($r, ['login', 'dezabonare', 'ai'])) check_csrf();
+if (!user() && !in_array($r, ['login', 'dezabonare'])) redirect(url('login'));
 try {
     match ($r) {
         'login' => r_login($post), 'logout' => (function () { session_destroy(); redirect(url('login')); })(),
@@ -21,6 +24,9 @@ try {
         'documente' => r_documente(), 'fisa' => r_fisa(), 'rapoarte' => r_rapoarte(),
         'doc' => r_doc(), 'docs_print' => r_docs_print(), 'docs_delete' => r_docs_delete(), 'genereaza' => r_genereaza($post),
         'semneaza' => r_semneaza($post), 'semneaza_instr' => r_semneaza_instr($post), 'offline' => r_offline(),
+        'fisier' => r_fisier(), 'fisier_sterge' => r_fisier_sterge(), 'doc_upload' => r_doc_upload(),
+        'anaf' => r_anaf(), 'ai' => r_ai(), 'ai_setari' => r_ai_setari($post),
+        'setari' => r_setari($post), 'preferinte' => r_preferinte($post), 'dezabonare' => r_dezabonare(),
         'mesaje' => r_mesaje($post), 'chat' => r_chat($post), 'tichete' => r_tichete($post),
         'portal' => r_portal(), 'take' => r_take(), 'submit_test' => r_submit_test(), 'sign' => r_sign(),
         default => page('Pagină inexistentă', '<div class="card">Pagina nu există.</div>'),

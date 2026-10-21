@@ -77,9 +77,9 @@ function nav(): string {
     $u = user(); if (!$u) return '';
     $cur = $_GET['r'] ?? 'dashboard';
     $items = match ($u['role']) {
-        'angajat' => ['portal' => 'Instruirile mele', 'semneaza' => 'De semnat', 'mesaje' => 'Mesaje', 'chat' => 'Chat', 'tichete' => 'Suport'],
-        'client' => ['dashboard' => 'Centru de termene', 'list&e=angajati' => 'Angajați', 'list&e=puncte' => 'Puncte de lucru', 'list&e=echipamente' => 'Echipamente', 'import' => 'Import', 'documente' => 'Documente', 'rapoarte' => 'Rapoarte', 'mesaje' => 'Mesaje', 'chat' => 'Chat', 'tichete' => 'Suport'],
-        default => ['dashboard' => 'Centru de termene', 'list&e=firme' => 'Firme', 'list&e=puncte' => 'Puncte de lucru', 'list&e=angajati' => 'Angajați', 'list&e=grupe' => 'Grupe', 'list&e=program' => 'Program instruire', 'list&e=categorii' => 'Categorii', 'list&e=cursuri' => 'Cursuri & teste', 'list&e=sabloane' => 'Șabloane', 'documente' => 'Documente', 'list&e=echipamente' => 'Echipamente', 'list&e=audituri' => 'Audit', 'list&e=neconformitati' => 'Neconformități', 'rapoarte' => 'Rapoarte', 'mesaje' => 'Mesaje', 'chat' => 'Chat', 'tichete' => 'Tichete'] + ($u['role'] === 'superadmin' ? ['list&e=users' => 'Utilizatori'] : []),
+        'angajat' => ['portal' => 'Instruirile mele', 'semneaza' => 'De semnat', 'mesaje' => 'Mesaje', 'chat' => 'Chat', 'tichete' => 'Suport', 'preferinte' => 'Preferințe'],
+        'client' => ['dashboard' => 'Centru de termene', 'list&e=angajati' => 'Angajați', 'list&e=puncte' => 'Puncte de lucru', 'list&e=echipamente' => 'Echipamente', 'import' => 'Import', 'documente' => 'Documente', 'rapoarte' => 'Rapoarte', 'mesaje' => 'Mesaje', 'chat' => 'Chat', 'tichete' => 'Suport', 'preferinte' => 'Preferințe'],
+        default => ['dashboard' => 'Centru de termene', 'list&e=firme' => 'Firme', 'list&e=puncte' => 'Puncte de lucru', 'list&e=angajati' => 'Angajați', 'list&e=grupe' => 'Grupe', 'list&e=program' => 'Program instruire', 'list&e=categorii' => 'Categorii', 'list&e=cursuri' => 'Cursuri & teste', 'list&e=sabloane' => 'Șabloane', 'documente' => 'Documente', 'list&e=echipamente' => 'Echipamente', 'list&e=audituri' => 'Audit', 'list&e=neconformitati' => 'Neconformități', 'rapoarte' => 'Rapoarte', 'mesaje' => 'Mesaje', 'chat' => 'Chat', 'tichete' => 'Tichete', 'preferinte' => 'Preferințe'] + ($u['role'] === 'superadmin' ? ['list&e=users' => 'Utilizatori', 'setari' => 'Setări e-mail', 'ai_setari' => 'Setări AI'] : []),
     };
     $h = '';
     foreach ($items as $k => $l) {
@@ -99,5 +99,5 @@ function page(string $title, string $body): void {
     echo '<!doctype html><html lang="ro"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' . h($title) . ' · BENIAL CONSULTING</title><link rel="stylesheet" href="style.css"><link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#0f172a"><link rel="icon" href="icons/icon-192.png"><link rel="apple-touch-icon" href="icons/apple-touch-icon.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="BENIAL"></head><body>';
     echo '<header class="top"><a class="logo" href="?"><span class="mark">B</span><span><b>BENIAL</b> CONSULTING<small>SSM · PSI · Situații de urgență</small></span></a>' . $userbox . '</header>';
     if ($u) echo '<nav class="nav">' . nav() . '</nav>';
-    echo '<main><h1>' . h($title) . '</h1>' . $fl . $body . '</main><footer>© ' . date('Y') . ' BENIAL CONSULTING · prototip de test</footer><script src="app.js"></script><script src="pwa.js"></script></body></html>';
+    echo '<main><h1>' . h($title) . '</h1>' . $fl . $body . '</main><footer>© ' . date('Y') . ' BENIAL CONSULTING · prototip de test</footer>' . (function_exists('ai_widget') ? ai_widget() : '') . '<script src="app.js"></script><script src="pwa.js"></script></body></html>';
 }

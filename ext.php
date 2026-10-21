@@ -150,6 +150,8 @@ function doc_page(array $docs, string $title): void {
     echo '<!doctype html><html lang="ro"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' . h($title) . '</title><link rel="stylesheet" href="style.css"></head><body class="doc">
     <div class="noprint docbar"><button class="btn" onclick="window.print()">Salvează ca PDF / Tipărește</button> <a class="btn ghost" href="javascript:history.back()">← Înapoi</a> <span class="muted small">În fereastra de tipărire alegeți „Salvare ca PDF”, format A4.</span></div>';
     foreach ($docs as $d) echo render_doc($d);
+    if (count($docs) === 1) { $d = $docs[0]; $fl = up_list(up_files('documente', (int)$d['id']), role() !== 'angajat', url('doc', ['id' => $d['id']]));
+        echo '<div class="noprint sheet-extra"><h3>Anexe / fișiere atașate</h3>' . ($fl ?: '<p class="muted">Nicio anexă.</p>') . (role() !== 'angajat' ? '<form method="post" enctype="multipart/form-data" action="' . url('doc_upload', ['id' => $d['id']]) . '">' . csrf_field() . up_input() . '<button class="btn sm">Încarcă</button></form>' : '') . '</div><script src="app.js"></script>'; }
     echo '</body></html>';
 }
 function r_doc(): void {
@@ -186,7 +188,7 @@ function r_documente(): void {
 }
 function r_docs_delete(): void {
     require_role('superadmin', 'inspector'); $n = 0;
-    foreach (array_map('intval', (array)($_POST['ids'] ?? [])) as $id) { $n += q("DELETE FROM documente WHERE id=? AND sablon_cod IS NOT NULL AND (status IS NULL OR status<>'finalizat')", [$id])->rowCount(); }
+    foreach (array_map('intval', (array)($_POST['ids'] ?? [])) as $id) { $k = q("DELETE FROM documente WHERE id=? AND sablon_cod IS NOT NULL AND (status IS NULL OR status<>'finalizat')", [$id])->rowCount(); if ($k) up_delete_for('documente', $id); $n += $k; }
     flash("$n documente șterse (cele finalizate se păstrează)."); redirect(url('documente'));
 }
 function r_genereaza(bool $post): void {
@@ -204,6 +206,7 @@ function r_genereaza(bool $post): void {
         foreach ($coduri as $cod) { $s = sablon($cod, $firma);
             if ($s['tip'] === 'tematica') foreach ($pcts as $p) { doc_generate($cod, $firma, $p ? (int)$p : null, null, $data, $instr); $n++; }
             else foreach ($ang as $a) { doc_generate($cod, $firma, null, (int)$a, $data, $instr); $n++; } }
+        notify_sign_pending(array_merge($ang, array_column(rows("SELECT DISTINCT clm_id FROM documente WHERE firma_id=? AND clm_id IS NOT NULL AND semn_clm IS NULL", [$firma]), 'clm_id')));
         flash("Au fost generate $n documente. Ele apar în portalul angajaților și al CLM pentru semnare."); redirect(url('documente', scope_firma() ? [] : ['firma' => $firma]));
     }
     $ck = ''; foreach (rows("SELECT cod, nume, domeniu, tip FROM sabloane WHERE firma_id IS NULL ORDER BY domeniu, cod") as $s) $ck .= '<label class="chk"><input type="checkbox" name="coduri[]" value="' . h($s['cod']) . '"> <b>' . h($s['domeniu']) . '</b> · ' . h($s['nume']) . ' <span class="b b-gray">' . h($s['tip']) . '</span></label>';
@@ -226,7 +229,8 @@ function r_semneaza(bool $post): void {
         $n = 0; foreach ($ids as $id) { if (!isset($T[$id])) continue; $d = $T[$id];
             if ((int)$d['angajat_id'] === $me && !$d['semn_ang'] && doc_needs_ang($d)) update('documente', $id, ['semn_ang' => $sig, 'semn_ang_data' => date('Y-m-d H:i')]);
             if ((int)$d['clm_id'] === $me && !$d['semn_clm']) update('documente', $id, ['semn_clm' => $sig, 'semn_clm_data' => date('Y-m-d H:i')]);
-            doc_refresh_status($id); $n++; }
+            doc_refresh_status($id); $n++; $notif[] = (int)$d['clm_id']; }
+        notify_sign_pending($notif ?? []);
         flash("Ați semnat $n documente."); redirect(url('portal'));
     }
     $sel = array_map('intval', (array)($_GET['ids'] ?? array_keys($T))); $sel = array_values(array_intersect($sel, array_keys($T)));
@@ -250,11 +254,11 @@ function r_mesaje(bool $post): void {
     if (!user()) redirect(url('login')); $me = me_k(); $C = contacts();
     if ($post) { $to = $_POST['to'] ?? ''; $sub = trim($_POST['subiect'] ?? ''); $b = trim($_POST['corp'] ?? '');
         if (!isset($C[$to]) || $b === '') { flash('Alegeți destinatarul și scrieți mesajul.', 'err'); redirect(url('mesaje', ['nou' => 1])); }
-        insert('mesaje', ['from_k' => $me, 'to_k' => $to, 'subiect' => $sub ?: '(fără subiect)', 'corp' => $b, 'citit' => 0, 'created_at' => date('Y-m-d H:i')]); flash('Mesaj trimis.'); redirect(url('mesaje', ['box' => 'trimise'])); }
+        $mid = insert('mesaje', ['from_k' => $me, 'to_k' => $to, 'subiect' => $sub ?: '(fără subiect)', 'corp' => $b, 'citit' => 0, 'created_at' => date('Y-m-d H:i')]); up_flash(up_save('mesaje', $mid, my_firma())); notify_message($mid); flash('Mesaj trimis.'); redirect(url('mesaje', ['box' => 'trimise'])); }
     if ($id = (int)($_GET['id'] ?? 0)) { $m = row("SELECT * FROM mesaje WHERE id=? AND (to_k=? OR from_k=?)", [$id, $me, $me]); if (!$m) redirect(url('mesaje'));
         if ($m['to_k'] === $me) update('mesaje', $id, ['citit' => 1]);
-        page(h($m['subiect']), '<div class="card"><p class="muted">De la <b>' . h(k_name($m['from_k'])) . '</b> către <b>' . h(k_name($m['to_k'])) . '</b> · ' . h($m['created_at']) . '</p><div class="txt">' . nl2br(h($m['corp'])) . '</div></div><div class="tools"><a class="btn" href="' . url('mesaje', ['nou' => 1, 'to' => $m['from_k'] === $me ? $m['to_k'] : $m['from_k'], 're' => 'Re: ' . $m['subiect']]) . '">Răspunde</a><a class="btn ghost" href="' . url('mesaje') . '">← Mesaje</a></div>'); return; }
-    if (!empty($_GET['nou'])) { page('Mesaj nou', '<form method="post" class="card form">' . csrf_field() . '<div class="grid"><label>Către <i class="req">*</i>' . select_html('to', $C, $_GET['to'] ?? '', '— alegeți —', true) . '</label><label>Subiect<input name="subiect" value="' . h($_GET['re'] ?? '') . '"></label><label class="full">Mesaj <i class="req">*</i><textarea name="corp" rows="6" required></textarea></label></div><div class="savebar"><a class="btn ghost" href="' . url('mesaje') . '">Renunță</a><button class="btn">Trimite</button></div></form>'); return; }
+        page(h($m['subiect']), '<div class="card"><p class="muted">De la <b>' . h(k_name($m['from_k'])) . '</b> către <b>' . h(k_name($m['to_k'])) . '</b> · ' . h($m['created_at']) . '</p><div class="txt">' . nl2br(h($m['corp'])) . '</div>' . up_list(up_files('mesaje', $id)) . '</div><div class="tools"><a class="btn" href="' . url('mesaje', ['nou' => 1, 'to' => $m['from_k'] === $me ? $m['to_k'] : $m['from_k'], 're' => 'Re: ' . $m['subiect']]) . '">Răspunde</a><a class="btn ghost" href="' . url('mesaje') . '">← Mesaje</a></div>'); return; }
+    if (!empty($_GET['nou'])) { page('Mesaj nou', '<form method="post" class="card form" enctype="multipart/form-data">' . csrf_field() . '<div class="grid"><label>Către <i class="req">*</i>' . select_html('to', $C, $_GET['to'] ?? '', '— alegeți —', true) . '</label><label>Subiect<input name="subiect" value="' . h($_GET['re'] ?? '') . '"></label><label class="full">Mesaj <i class="req">*</i><textarea name="corp" rows="6" required></textarea></label></div>' . up_input() . '<div class="savebar"><a class="btn ghost" href="' . url('mesaje') . '">Renunță</a><button class="btn">Trimite</button></div></form>'); return; }
     $sent = ($_GET['box'] ?? '') === 'trimise';
     $M = rows("SELECT * FROM mesaje WHERE " . ($sent ? 'from_k' : 'to_k') . "=? ORDER BY id DESC", [$me]); $t = '';
     foreach ($M as $m) $t .= '<tr' . (!$m['citit'] && !$sent ? ' class="unread"' : '') . '><td data-l="Data">' . h($m['created_at']) . '</td><td data-l="' . ($sent ? 'Către' : 'De la') . '">' . h(k_name($sent ? $m['to_k'] : $m['from_k'])) . '</td><td data-l="Subiect"><a href="' . url('mesaje', ['id' => $m['id']]) . '">' . h($m['subiect']) . '</a>' . (!$m['citit'] && !$sent ? ' <span class="b b-red">nou</span>' : '') . '</td></tr>';
@@ -280,19 +284,19 @@ function r_tichete(bool $post): void {
     if ($id = (int)($_GET['id'] ?? 0)) {
         $t = row("SELECT * FROM tichete WHERE id=?", [$id]); if (!$t || (!$admin && $t['autor_k'] !== $me)) redirect(url('tichete'));
         if ($post) { if (!empty($_POST['status']) && $admin) update('tichete', $id, ['status' => $_POST['status'] === 'rezolvat' ? 'rezolvat' : 'deschis']);
-            if (($x = trim($_POST['text'] ?? '')) !== '') { insert('tichete_msg', ['tichet_id' => $id, 'autor_k' => $me, 'autor' => user()['name'], 'text' => $x, 'created_at' => date('Y-m-d H:i')]); if (!$admin) update('tichete', $id, ['status' => 'deschis']); }
+            if (($x = trim($_POST['text'] ?? '')) !== '') { $tm = insert('tichete_msg', ['tichet_id' => $id, 'autor_k' => $me, 'autor' => user()['name'], 'text' => $x, 'created_at' => date('Y-m-d H:i')]); if (!$admin) update('tichete', $id, ['status' => 'deschis']); up_flash(up_save('tichete_msg', $tm, $t['firma_id'] ? (int)$t['firma_id'] : null)); notify_ticket($id, $tm, false); }
             redirect(url('tichete', ['id' => $id])); }
-        $h = ''; foreach (rows("SELECT * FROM tichete_msg WHERE tichet_id=? ORDER BY id", [$id]) as $m) $h .= '<div class="card"><p class="muted small"><b>' . h($m['autor']) . '</b> · ' . h($m['created_at']) . '</p>' . nl2br(h($m['text'])) . '</div>';
-        page('Tichet #' . $id . ': ' . $t['subiect'], '<p>' . ($t['status'] === 'rezolvat' ? '<span class="b b-green">rezolvat</span>' : '<span class="b b-orange">deschis</span>') . ' · prioritate ' . h($t['prioritate']) . ' · ' . h($t['autor']) . '</p>' . $h . '<form method="post" class="card form">' . csrf_field() . '<label class="full">Răspuns<textarea name="text" rows="4"></textarea></label>' . ($admin ? '<label>Stare' . select_html('status', ['deschis' => 'Deschis', 'rezolvat' => 'Rezolvat'], $t['status']) . '</label>' : '') . '<div class="savebar"><a class="btn ghost" href="' . url('tichete') . '">← Tichete</a><button class="btn">Trimite</button></div></form>'); return;
+        $h = ''; foreach (rows("SELECT * FROM tichete_msg WHERE tichet_id=? ORDER BY id", [$id]) as $m) $h .= '<div class="card"><p class="muted small"><b>' . h($m['autor']) . '</b> · ' . h($m['created_at']) . '</p>' . nl2br(h($m['text'])) . up_list(up_files('tichete_msg', (int)$m['id'])) . '</div>';
+        page('Tichet #' . $id . ': ' . $t['subiect'], '<p>' . ($t['status'] === 'rezolvat' ? '<span class="b b-green">rezolvat</span>' : '<span class="b b-orange">deschis</span>') . ' · prioritate ' . h($t['prioritate']) . ' · ' . h($t['autor']) . '</p>' . $h . '<form method="post" class="card form" enctype="multipart/form-data">' . csrf_field() . '<label class="full">Răspuns<textarea name="text" rows="4"></textarea></label>' . up_input() . ($admin ? '<label>Stare' . select_html('status', ['deschis' => 'Deschis', 'rezolvat' => 'Rezolvat'], $t['status']) . '</label>' : '') . '<div class="savebar"><a class="btn ghost" href="' . url('tichete') . '">← Tichete</a><button class="btn">Trimite</button></div></form>'); return;
     }
     if ($post) { $s = trim($_POST['subiect'] ?? ''); $x = trim($_POST['text'] ?? '');
         if ($s === '' || $x === '') { flash('Completați subiectul și descrierea.', 'err'); redirect(url('tichete')); }
         $tid = insert('tichete', ['autor_k' => $me, 'autor' => user()['name'], 'firma_id' => my_firma(), 'subiect' => $s, 'prioritate' => in_array($_POST['prioritate'] ?? '', ['mică', 'normală', 'urgentă']) ? $_POST['prioritate'] : 'normală', 'status' => 'deschis', 'created_at' => date('Y-m-d H:i')]);
-        insert('tichete_msg', ['tichet_id' => $tid, 'autor_k' => $me, 'autor' => user()['name'], 'text' => $x, 'created_at' => date('Y-m-d H:i')]); flash('Tichet deschis.'); redirect(url('tichete', ['id' => $tid])); }
+        $tm = insert('tichete_msg', ['tichet_id' => $tid, 'autor_k' => $me, 'autor' => user()['name'], 'text' => $x, 'created_at' => date('Y-m-d H:i')]); up_flash(up_save('tichete_msg', $tm, my_firma())); notify_ticket($tid, $tm, true); flash('Tichet deschis.'); redirect(url('tichete', ['id' => $tid])); }
     $T = $admin ? rows("SELECT * FROM tichete ORDER BY status, id DESC") : rows("SELECT * FROM tichete WHERE autor_k=? ORDER BY id DESC", [$me]); $t = '';
     foreach ($T as $x) $t .= '<tr><td data-l="#">' . (int)$x['id'] . '</td><td data-l="Subiect"><a href="' . url('tichete', ['id' => $x['id']]) . '">' . h($x['subiect']) . '</a></td><td data-l="Autor">' . h($x['autor']) . '</td><td data-l="Prioritate">' . h($x['prioritate']) . '</td><td data-l="Stare">' . ($x['status'] === 'rezolvat' ? '<span class="b b-green">rezolvat</span>' : '<span class="b b-orange">deschis</span>') . '</td><td data-l="Data">' . h($x['created_at']) . '</td></tr>';
     page('Tichete suport', '<div class="card p0"><table class="tbl"><thead><tr><th>#</th><th>Subiect</th><th>Autor</th><th>Prioritate</th><th>Stare</th><th>Data</th></tr></thead><tbody>' . ($t ?: '<tr><td colspan="6" class="empty">Niciun tichet.</td></tr>') . '</tbody></table></div>
-    <form method="post" class="card form">' . csrf_field() . '<h2>Tichet nou</h2><div class="grid"><label>Subiect <i class="req">*</i><input name="subiect" required></label><label>Prioritate' . select_html('prioritate', ['mică' => 'mică', 'normală' => 'normală', 'urgentă' => 'urgentă'], 'normală') . '</label><label class="full">Descriere <i class="req">*</i><textarea name="text" rows="4" required></textarea></label></div><div class="savebar"><button class="btn">Deschide tichet</button></div></form>');
+    <form method="post" class="card form" enctype="multipart/form-data">' . csrf_field() . '<h2>Tichet nou</h2><div class="grid"><label>Subiect <i class="req">*</i><input name="subiect" required></label><label>Prioritate' . select_html('prioritate', ['mică' => 'mică', 'normală' => 'normală', 'urgentă' => 'urgentă'], 'normală') . '</label><label class="full">Descriere <i class="req">*</i><textarea name="text" rows="4" required></textarea></label></div>' . up_input() . '<div class="savebar"><button class="btn">Deschide tichet</button></div></form>');
 }
 
 /* ---------- rapoarte suplimentare ---------- */

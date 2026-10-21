@@ -68,7 +68,7 @@ function allocate_program(int $pid): int {
     $p = row("SELECT * FROM program WHERE id=?", [$pid]); if (!$p) return 0; $n = 0;
     foreach (rows("SELECT id FROM angajati WHERE grupa_id=? AND activ=1", [$p['grupa_id']]) as $a) {
         $open = val("SELECT COUNT(*) FROM instruiri WHERE angajat_id=? AND curs_id=? AND (status IN ('alocat','promovat','picat') OR (status='semnat' AND urmatoarea > ?))", [$a['id'], $p['curs_id'], date('Y-m-d', strtotime('+30 days'))]);
-        if (!$open) { insert('instruiri', ['angajat_id' => $a['id'], 'curs_id' => $p['curs_id'], 'program_id' => $pid, 'status' => 'alocat', 'created_at' => date('Y-m-d H:i')]); $n++; }
+        if (!$open) { $iid = insert('instruiri', ['angajat_id' => $a['id'], 'curs_id' => $p['curs_id'], 'program_id' => $pid, 'status' => 'alocat', 'created_at' => date('Y-m-d H:i')]); $n++; if (function_exists('notify_test')) notify_test($iid); }
     }
     return $n;
 }

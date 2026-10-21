@@ -123,7 +123,8 @@ function r_form(array $E, array $data = null, array $errors = []): void {
     $back = url('list', ['e' => $E['key']] + (!empty($E['parent']) && !empty($data[$E['parent']]) ? [$E['parent'] => $data[$E['parent']]] : []));
     if (!empty($E['parent'])) $back = url('curs', ['id' => $data['curs_id']]);
     $summary = $errors ? '<div class="flash err">Formularul are ' . count($errors) . ' erori. Corectați câmpurile marcate cu roșu.</div>' : '';
-    page(($id ? 'Editează ' : 'Adaugă ') . $E['one'], $summary . '<form method="post" action="' . url('save', ['e' => $E['key'], 'id' => $id]) . '" class="card form" novalidate>' . csrf_field() . '<div class="grid">' . $h . '</div>
+    $up = in_array($E['key'], UP_ENT, true) ? '<div class="full"><h3>Fișiere atașate</h3>' . ($id ? up_list(up_files($E['key'], $id), true, url('form', ['e' => $E['key'], 'id' => $id])) : '') . up_input() . '</div>' : '';
+    page(($id ? 'Editează ' : 'Adaugă ') . $E['one'], $summary . '<form method="post" action="' . url('save', ['e' => $E['key'], 'id' => $id]) . '" class="card form" novalidate enctype="multipart/form-data">' . csrf_field() . '<div class="grid">' . $h . '</div>' . $up . '
       <div class="savebar"><a class="btn ghost" href="' . $back . '">Renunță</a><button class="btn">Salvează</button></div></form>');
 }
 function r_save(array $E): void {
@@ -156,6 +157,7 @@ function r_save(array $E): void {
     if ($id) update($E['key'], $id, $d);
     else { if ($E['key'] === 'angajati') $d['cod_acces'] = gen_code(); if ($E['key'] === 'users') $d['created_at'] = date('Y-m-d H:i'); $id = insert($E['key'], $d); }
     if ($E['key'] === 'angajati' && $d['grupa_id']) foreach (rows("SELECT id FROM program WHERE grupa_id=?", [$d['grupa_id']]) as $p) allocate_program((int)$p['id']);
+    if (in_array($E['key'], UP_ENT, true)) up_flash(up_save($E['key'], (int)$id, isset($d['firma_id']) ? (int)$d['firma_id'] : (isset($old['firma_id']) ? (int)$old['firma_id'] : null)));
     flash(ucfirst($E['one']) . ' salvat(ă) cu succes.');
     if ($E['key'] === 'angajati') redirect(url('angajat', ['id' => $id]));
     if (!empty($E['parent'])) redirect(url('curs', ['id' => $d['curs_id']]));
@@ -175,7 +177,7 @@ function r_delete(array $E): void {
     if ($block) { flash($block, 'err'); }
     else {
         if ($E['key'] === 'angajati') q("DELETE FROM instruiri WHERE angajat_id=? AND status<>'semnat'", [$id]);
-        q("DELETE FROM {$E['key']} WHERE id=?", [$id]); flash(ucfirst($E['one']) . ' șters(ă).');
+        q("DELETE FROM {$E['key']} WHERE id=?", [$id]); up_delete_for($E['key'], $id); if ($E['key'] === 'cursuri') foreach (rows("SELECT id FROM lectii WHERE curs_id=?", [$id]) as $l) up_delete_for('lectii', (int)$l['id']); flash(ucfirst($E['one']) . ' șters(ă).');
     }
     if (!empty($E['parent'])) redirect(url('curs', ['id' => $r['curs_id']]));
     redirect(url('list', ['e' => $E['key']]));
@@ -198,6 +200,7 @@ function r_angajat(): void {
     <div class="cols"><div class="card"><h2>Date angajat</h2><dl class="dl">' . $dl('Firmă', h($f['denumire'])) . $dl('CNP', '<span class="mono">' . mask_cnp($a['cnp']) . '</span>') . $dl('Funcție / COR', h($a['functie'] . ' / ' . $a['cor'])) . $dl('Punct de lucru', h($p['nume'] ?? '—')) . $dl('Grupă', h($g['nume'] ?? '—')) . $dl('Data angajării', fmt_date($a['data_angajarii'])) . $dl('Telefon', h($a['telefon'])) . $dl('Medicina muncii', fmt_date($a['medical_expira']) . ' ' . badge_days(days_until($a['medical_expira']))) . '</dl></div>
     <div class="card"><h2>Acces portal angajat</h2><p>Angajatul intră pe <b>pagina de autentificare → Portal angajat</b> cu codul:</p><p class="code">' . h($a['cod_acces']) . '</p><p class="muted">Codul se comunică personal angajatului. Generați unul nou dacă a fost compromis.</p>' . post_btn(url('regen', ['id' => $a['id']]), 'Generează cod nou', 'ghost', 'Codul vechi nu va mai funcționa. Continuați?') . '</div></div>
     ' . (is_staff() ? '<div class="card"><h2>Rezultat test offline</h2><form method="post" action="' . url('offline', ['id' => $a['id']]) . '" class="tools">' . csrf_field() . select_html('ins', array_column(array_filter($ins, fn($i) => $i['status'] !== 'semnat'), 'titlu', 'id'), '', '— instruire —', true) . '<input type="number" name="scor" min="0" max="100" placeholder="Scor %" required><button class="btn ghost">Înregistrează</button></form></div>' : '') . '
+    ' . (($fl = up_list(up_files('angajati', (int)$a['id']), true, url('angajat', ['id' => $a['id']]))) ? '<div class="card"><h2>Fișiere atașate</h2>' . $fl . '</div>' : '') . '
     <div class="card p0"><h2 class="pad">Documente <a class="btn sm" href="' . url('documente', ['q' => $a['nume']]) . '">Toate</a></h2><table class="tbl"><tbody>' . (implode('', array_map(fn($d) => '<tr><td>' . h($d['titlu']) . '</td><td>' . fmt_date($d['data_doc']) . '</td><td>' . doc_status_label($d) . '</td><td class="act"><a class="btn sm ghost" href="' . url('doc', ['id' => $d['id']]) . '">Deschide</a></td></tr>', rows("SELECT * FROM documente WHERE angajat_id=? AND sablon_cod IS NOT NULL ORDER BY id DESC", [$a['id']]))) ?: '<tr><td class="empty">Niciun document generat.</td></tr>') . '</tbody></table></div>
     <div class="card p0"><h2 class="pad">Instruiri</h2><table class="tbl"><thead><tr><th>Curs</th><th>Stare</th><th>Scor</th><th>Semnat</th><th>Următoarea instruire</th><th></th></tr></thead><tbody>' . $t . '</tbody></table></div>');
 }
@@ -209,10 +212,10 @@ function r_curs(): void {
     require_role('superadmin', 'inspector');
     $c = load_scoped(ent('cursuri'), (int)$_GET['id']);
     $L = rows("SELECT * FROM lectii WHERE curs_id=? ORDER BY ordine", [$c['id']]); $Q = rows("SELECT * FROM intrebari WHERE curs_id=? ORDER BY id", [$c['id']]);
-    $lh = ''; foreach ($L as $l) $lh .= '<tr><td>' . $l['ordine'] . '</td><td>' . h($l['titlu']) . ($l['video_url'] ? ' <span class="b b-gray">video</span>' : '') . '</td><td class="act"><a class="btn sm" href="' . url('form', ['e' => 'lectii', 'id' => $l['id']]) . '">Editează</a>' . post_btn(url('delete', ['e' => 'lectii', 'id' => $l['id']]), 'Șterge', 'sm danger', 'Ștergeți lecția?') . '</td></tr>';
+    $lh = ''; foreach ($L as $l) $lh .= '<tr><td>' . $l['ordine'] . '</td><td>' . h($l['titlu']) . ($l['video_url'] ? ' <span class="b b-gray">video</span>' : '') . (($nf = count(up_files('lectii', (int)$l['id']))) ? ' <span class="b b-gray">' . $nf . ' fișiere</span>' : '') . '</td><td class="act"><a class="btn sm" href="' . url('form', ['e' => 'lectii', 'id' => $l['id']]) . '">Editează</a>' . post_btn(url('delete', ['e' => 'lectii', 'id' => $l['id']]), 'Șterge', 'sm danger', 'Ștergeți lecția?') . '</td></tr>';
     $qh = ''; foreach ($Q as $i => $x) $qh .= '<tr><td>' . ($i + 1) . '</td><td>' . h($x['text']) . '<br><small class="muted">Corect: ' . h(implode('; ', array_map(fn($o) => strtoupper($o) . ') ' . ($x['opt_' . $o] ?? ''), array_filter(explode(',', (string)$x['corect']))))) . ((int)($x['puncte'] ?? 0) > 1 ? ' · ' . (int)$x['puncte'] . ' puncte' : '') . '</small></td><td class="act"><a class="btn sm" href="' . url('form', ['e' => 'intrebari', 'id' => $x['id']]) . '">Editează</a>' . post_btn(url('delete', ['e' => 'intrebari', 'id' => $x['id']]), 'Șterge', 'sm danger', 'Ștergeți întrebarea?') . '</td></tr>';
     page($c['titlu'], '<div class="tools"><a class="btn" href="' . url('form', ['e' => 'cursuri', 'id' => $c['id']]) . '">Editează cursul</a><a class="btn ghost" href="' . url('list', ['e' => 'cursuri']) . '">← Cursuri</a></div>
-    <div class="card"><p>' . h($c['tip']) . ' · ' . (int)$c['durata_min'] . ' minute · prag promovare ' . (int)$c['prag_promovare'] . '%</p><p class="muted">' . h($c['descriere']) . '</p></div>
+    <div class="card">' . up_list(up_files('cursuri', (int)$c['id'])) . '<p>' . h($c['tip']) . ' · ' . (int)$c['durata_min'] . ' minute · prag promovare ' . (int)$c['prag_promovare'] . '%</p><p class="muted">' . h($c['descriere']) . '</p></div>
     <div class="cols"><div class="card p0"><h2 class="pad">Lecții <a class="btn sm" href="' . url('form', ['e' => 'lectii', 'curs_id' => $c['id']]) . '">+ Lecție</a></h2><table class="tbl"><tbody>' . ($lh ?: '<tr><td class="empty">Nicio lecție.</td></tr>') . '</tbody></table></div>
     <div class="card p0"><h2 class="pad">Test (' . count($Q) . ' întrebări) <a class="btn sm" href="' . url('form', ['e' => 'intrebari', 'curs_id' => $c['id']]) . '">+ Întrebare</a></h2><table class="tbl"><tbody>' . ($qh ?: '<tr><td class="empty">Nicio întrebare.</td></tr>') . '</tbody></table></div></div>');
 }
@@ -417,7 +420,7 @@ function r_take(): void {
     $lh = '';
     foreach ($L as $n => $l) {
         $v = ''; if ($l['video_url']) $v = preg_match('/\.mp4($|\?)/', $l['video_url']) ? '<video controls src="' . h($l['video_url']) . '"></video>' : '<div class="video"><iframe src="' . h($l['video_url']) . '" allowfullscreen loading="lazy"></iframe></div>';
-        $lh .= '<details class="card lesson"' . ($n === 0 ? ' open' : '') . '><summary>Lecția ' . (int)$l['ordine'] . ': ' . h($l['titlu']) . '</summary><div class="txt">' . nl2br(h($l['continut'])) . '</div>' . $v . '</details>';
+        $lh .= '<details class="card lesson"' . ($n === 0 ? ' open' : '') . '><summary>Lecția ' . (int)$l['ordine'] . ': ' . h($l['titlu']) . '</summary><div class="txt">' . nl2br(h($l['continut'])) . '</div>' . $v . up_list(up_files('lectii', (int)$l['id'])) . '</details>';
     }
     $c = row("SELECT * FROM cursuri WHERE id=?", [$i['curs_id']]);
     if (($c['mod_test'] ?? '') === 'offline') { page($i['titlu'], $lh . '<div class="card"><p>Testul pentru această instruire se susține <b>pe hârtie</b>. După ce inspectorul înregistrează rezultatul, veți putea semna fișa aici.</p></div>'); return; }
@@ -428,6 +431,7 @@ function r_take(): void {
         foreach (['a', 'b', 'c', 'd'] as $o) if (trim((string)($q['opt_' . $o] ?? '')) !== '') $qh .= '<label class="opt"><input type="' . ($multi ? 'checkbox' : 'radio') . '" name="q' . $q['id'] . '[]" value="' . $o . '"' . ($multi ? '' : ' required') . '> ' . h($q['opt_' . $o]) . '</label>'; $qh .= '</fieldset>'; }
     $timer = (int)$c['timp_test_min'] > 0 ? '<div class="timer" data-min="' . (int)$c['timp_test_min'] . '">⏱ <span></span></div>' : '';
     $warn = $i['status'] === 'picat' ? '<div class="flash err">Data trecută ați obținut ' . (int)$i['scor'] . '%. Recitiți lecțiile și reluați testul (prag: ' . (int)$i['prag_promovare'] . '%).</div>' : '';
+    $cf = up_list(up_files('cursuri', (int)$i['curs_id'])); if ($cf) $lh = '<div class="card"><h3>Materiale curs</h3>' . $cf . '</div>' . $lh;
     page($i['titlu'], $warn . '<p class="muted">Parcurgeți lecțiile, apoi răspundeți la test. Prag de promovare: ' . (int)$i['prag_promovare'] . '%.</p>' . $lh . '<h2>Test</h2>' . $timer . '<form method="post" action="' . url('submit_test', ['id' => $i['id']]) . '" class="card" id="testform">' . csrf_field() . $qh . '<div class="savebar"><button class="btn">Trimite răspunsurile</button></div></form>');
 }
 function r_submit_test(): void {
@@ -459,6 +463,7 @@ function r_sign(): void {
     $now = date('Y-m-d H:i'); $res = $_SESSION['test_res_' . $i['id']] ?? [];
     $did = doc_generate($cod, (int)$a['firma_id'], null, (int)$a['id'], today(), $instr, (int)$i['id']); update('documente', $did, ['semn_ang' => $sig, 'semn_ang_data' => $now]); doc_refresh_status($did);
     if (!empty($c['emite_fisa16'])) { $tid = doc_generate($pfx . '-TEST', (int)$a['firma_id'], null, (int)$a['id'], today(), $instr, (int)$i['id'], ['instruire' => $res]); update('documente', $tid, ['semn_ang' => $sig, 'semn_ang_data' => $now]); doc_refresh_status($tid); }
+    notify_sign_pending([(int)val("SELECT clm_id FROM documente WHERE id=?", [$did])]);
     flash('Fișa a fost semnată. Urmează semnătura conducătorului locului de muncă.');
     redirect(url('doc', ['id' => $did]));
 }
