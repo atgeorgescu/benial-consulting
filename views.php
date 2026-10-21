@@ -22,7 +22,8 @@ function r_login(bool $post): void {
       <button class="btn">Intră în cont</button></form>
     <form method="post" class="card"><h2>Portal angajat</h2><p class="muted">Introduceți codul de acces primit de la angajator (pe telefon sau calculator).</p><input type="hidden" name="mode" value="angajat">
       <label>Cod de acces<input name="cod" required autocapitalize="characters" placeholder="ex. AB12CD34"></label>
-      <button class="btn">Intră în portal</button></form></div>');
+      <button class="btn">Intră în portal</button></form></div>
+    <div class="card install-card" id="pwa-install" hidden><h2>📲 Aplicația BENIAL</h2><p class="muted">Instalați platforma pe telefon sau calculator pentru acces rapid, ca o aplicație.</p><button type="button" class="btn" id="pwa-btn">Instalează aplicația</button><div id="pwa-ios" class="muted" hidden><p><b>Pe iPhone/iPad (Safari):</b></p><ol><li>Apăsați butonul <b>Partajare</b> <span aria-hidden="true">⬆️</span> din bara de jos</li><li>Alegeți <b>Adaugă pe ecranul principal</b> (Add to Home Screen)</li><li>Apăsați <b>Adaugă</b></li></ol></div><p id="pwa-help" class="muted" hidden>Dacă butonul nu răspunde, deschideți meniul browserului (⋮) și alegeți <b>Instalează aplicația</b> / <b>Adaugă pe ecranul de pornire</b>.</p></div>');
 }
 
 /* ---------- liste generice ---------- */

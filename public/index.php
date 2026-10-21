@@ -4,7 +4,7 @@ require __DIR__ . '/../schema.php';
 require __DIR__ . '/../entities.php';
 require __DIR__ . '/../views.php';
 migrate();
-$flag = sys_get_temp_dir() . '/benial_seeded'; if (!file_exists($flag)) { seed(); @touch($flag); }
+$flag = sys_get_temp_dir() . '/benial_seeded_' . md5((string)getenv('DATABASE_URL') . __DIR__); if (!file_exists($flag)) { seed(); @touch($flag); }
 $r = $_GET['r'] ?? (user() ? (role() === 'angajat' ? 'portal' : 'dashboard') : 'login');
 $post = $_SERVER['REQUEST_METHOD'] === 'POST';
 if ($post && $r !== 'login') check_csrf();

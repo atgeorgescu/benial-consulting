@@ -39,3 +39,4 @@ body.doc{background:#e5e7eb}.docbar{max-width:800px;margin:1rem auto;display:fle
 .sig{max-width:150px;max-height:70px}.sigline{margin-top:2.2rem;border-top:1px solid #333;font-size:.7rem;color:var(--mut)}.small{font-size:.78rem;color:var(--mut)}
 @media print{.noprint,.nav,.top,footer{display:none!important}body,body.doc{background:#fff}.sheet{box-shadow:none;margin:0;padding:0}.card{box-shadow:none}}
 @media (max-width:700px){.tbl thead{display:none}.tbl tr{display:block;border-bottom:1px solid var(--line);padding:.5rem 0}.tbl td{display:flex;justify-content:space-between;border:0;padding:.3rem .9rem}.tbl td[data-l]::before{content:attr(data-l);color:var(--mut);font-size:.8rem;margin-right:1rem}.tbl td.act{justify-content:flex-end;flex-wrap:wrap;gap:.3rem}.tools input,.tools select{min-width:0;flex:1}h1{font-size:1.3rem}}
+.install-card{max-width:760px;margin:1rem auto 0}.install-card ol{margin:.3rem 0 0 1.1rem;padding:0}
