@@ -3,7 +3,8 @@ require __DIR__ . '/../lib.php';
 require __DIR__ . '/../schema.php';
 require __DIR__ . '/../entities.php';
 require __DIR__ . '/../views.php';
-migrate();
+require __DIR__ . '/../ext.php';
+migrate(); migrate_ext();
 $flag = sys_get_temp_dir() . '/benial_seeded_' . md5((string)getenv('DATABASE_URL') . __DIR__); if (!file_exists($flag)) { seed(); @touch($flag); }
 $r = $_GET['r'] ?? (user() ? (role() === 'angajat' ? 'portal' : 'dashboard') : 'login');
 $post = $_SERVER['REQUEST_METHOD'] === 'POST';
@@ -18,6 +19,9 @@ try {
         'angajat' => r_angajat(), 'regen' => r_regen(), 'alloc' => r_alloc(), 'curs' => r_curs(),
         'import' => r_import($post), 'import_template' => r_import_template(),
         'documente' => r_documente(), 'fisa' => r_fisa(), 'rapoarte' => r_rapoarte(),
+        'doc' => r_doc(), 'docs_print' => r_docs_print(), 'docs_delete' => r_docs_delete(), 'genereaza' => r_genereaza($post),
+        'semneaza' => r_semneaza($post), 'semneaza_instr' => r_semneaza_instr($post), 'offline' => r_offline(),
+        'mesaje' => r_mesaje($post), 'chat' => r_chat($post), 'tichete' => r_tichete($post),
         'portal' => r_portal(), 'take' => r_take(), 'submit_test' => r_submit_test(), 'sign' => r_sign(),
         default => page('Pagină inexistentă', '<div class="card">Pagina nu există.</div>'),
     };

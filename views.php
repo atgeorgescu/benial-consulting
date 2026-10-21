@@ -4,10 +4,11 @@ function r_login(bool $post): void {
     $err = '';
     if ($post) {
         if (($_POST['mode'] ?? '') === 'angajat') {
-            $cod = strtoupper(trim($_POST['cod'] ?? ''));
+            $cod = strtoupper(trim($_POST['cod'] ?? '')); $un = trim($_POST['username'] ?? '');
             $a = $cod ? row("SELECT * FROM angajati WHERE cod_acces=? AND activ=1", [$cod]) : null;
+            if (!$a && $un !== '') { $x = row("SELECT * FROM angajati WHERE username=? AND activ=1", [$un]); if ($x && $x['password_hash'] && password_verify($_POST['upass'] ?? '', $x['password_hash'])) $a = $x; }
             if ($a) { session_regenerate_id(true); $_SESSION['user'] = ['id' => 0, 'role' => 'angajat', 'name' => $a['prenume'] . ' ' . $a['nume'], 'angajat_id' => (int)$a['id'], 'firma_id' => (int)$a['firma_id']]; redirect(url('portal')); }
-            $err = 'Cod de acces invalid.';
+            $err = 'Cod de acces sau date de autentificare invalide.';
         } else {
             $u = row("SELECT * FROM users WHERE email=?", [trim($_POST['email'] ?? '')]);
             if ($u && password_verify($_POST['password'] ?? '', $u['password_hash'])) { session_regenerate_id(true); $_SESSION['user'] = ['id' => (int)$u['id'], 'role' => $u['role'], 'name' => $u['name'], 'firma_id' => $u['firma_id']]; redirect(url('dashboard')); }
@@ -21,7 +22,7 @@ function r_login(bool $post): void {
       <label>Parolă<input name="password" type="password" required autocomplete="current-password"></label>
       <button class="btn">Intră în cont</button></form>
     <form method="post" class="card"><h2>Portal angajat</h2><p class="muted">Introduceți codul de acces primit de la angajator (pe telefon sau calculator).</p><input type="hidden" name="mode" value="angajat">
-      <label>Cod de acces<input name="cod" required autocapitalize="characters" placeholder="ex. AB12CD34"></label>
+      <label>Cod de acces<input name="cod" autocapitalize="characters" placeholder="ex. AB12CD34"></label><p class="muted small">sau cu utilizator și parolă:</p><label>Utilizator<input name="username" autocomplete="username"></label><label>Parolă<input name="upass" type="password" autocomplete="current-password"></label>
       <button class="btn">Intră în portal</button></form></div>
     <div class="card install-card" id="pwa-install" hidden><h2>📲 Aplicația BENIAL</h2><p class="muted">Instalați platforma pe telefon sau calculator pentru acces rapid, ca o aplicație.</p><button type="button" class="btn" id="pwa-btn">Instalează aplicația</button><div id="pwa-ios" class="muted" hidden><p><b>Pe iPhone/iPad (Safari):</b></p><ol><li>Apăsați butonul <b>Partajare</b> <span aria-hidden="true">⬆️</span> din bara de jos</li><li>Alegeți <b>Adaugă pe ecranul principal</b> (Add to Home Screen)</li><li>Apăsați <b>Adaugă</b></li></ol></div><p id="pwa-help" class="muted" hidden>Dacă butonul nu răspunde, deschideți meniul browserului (⋮) și alegeți <b>Instalează aplicația</b> / <b>Adaugă pe ecranul de pornire</b>.</p></div>');
 }
@@ -35,7 +36,8 @@ function display(array $E, string $col, array $row, array &$cache): string {
     return match ($f[1]) {
         'select' => h(($cache[$col] ??= ($f[3])())[$v] ?? '—'),
         'cnp' => '<span class="mono">' . mask_cnp($v) . '</span>',
-        'date' => $col === 'medical_expira' ? fmt_date($v) . ' ' . badge_days(days_until($v)) : fmt_date($v),
+        'date' => in_array($col, ['medical_expira', 'urmatoarea', 'termen']) ? fmt_date($v) . ' ' . badge_days(days_until($v)) : fmt_date($v),
+        'multi' => h(implode(', ', array_map(fn($x) => ($cache[$col] ??= ($f[3])())[$x] ?? $x, array_filter(explode(',', (string)$v))))),
         'check' => $v ? 'Da' : 'Nu',
         default => h(mb_strimwidth((string)$v, 0, 70, '…')),
     };
@@ -45,6 +47,9 @@ function scoped_where(array $E, array &$args): string {
     if ($E['scope'] && ($sf = scope_firma())) { $w[] = "{$E['scope']}=?"; $args[] = $sf; }
     if (!empty($E['parent']) && !empty($_GET[$E['parent']])) { $w[] = "{$E['parent']}=?"; $args[] = (int)$_GET[$E['parent']]; }
     if ($E['scope'] === 'firma_id' && !empty($_GET['firma'])) { $w[] = "firma_id=?"; $args[] = (int)$_GET['firma']; }
+    if ($E['key'] === 'angajati' && !empty($_GET['punct'])) { $w[] = "(punct_id=? OR puncte_extra LIKE ?)"; $args[] = (int)$_GET['punct']; $args[] = '%' . (int)$_GET['punct'] . '%'; }
+    if ($E['key'] === 'angajati' && ($fn = trim($_GET['functie'] ?? '')) !== '') { $w[] = "functie=?"; $args[] = $fn; }
+    if ($E['key'] === 'echipamente' && !empty($_GET['cat'])) { $w[] = "categorie=?"; $args[] = $_GET['cat']; }
     if ($s = trim($_GET['q'] ?? '')) { $first = array_keys(array_filter($E['fields'], fn($f) => in_array($f[1], ['text', 'textarea', 'email'])))[0] ?? null;
         $txt = array_slice(array_keys(array_filter($E['fields'], fn($f) => in_array($f[1], ['text', 'email']))), 0, 4);
         if ($txt) { $w[] = '(' . implode(' OR ', array_map(fn($c) => "LOWER($c) LIKE ?", $txt)) . ')'; foreach ($txt as $_) $args[] = '%' . mb_strtolower($s) . '%'; } }
@@ -72,6 +77,8 @@ function r_list(array $E): void {
     $tools = '<form class="tools" method="get"><input type="hidden" name="r" value="list"><input type="hidden" name="e" value="' . $E['key'] . '">'
         . '<input name="q" placeholder="Caută…" value="' . h($_GET['q'] ?? '') . '">'
         . ($E['scope'] === 'firma_id' && !scope_firma() ? select_html('firma', opts("SELECT id, denumire AS l FROM firme", false), $_GET['firma'] ?? '', 'Toate firmele') : '')
+        . ($E['key'] === 'angajati' ? select_html('punct', opts("SELECT id, nume AS l FROM puncte" . (scope_firma() ? ' WHERE firma_id=' . scope_firma() : ''), false), $_GET['punct'] ?? '', 'Toate punctele') . select_html('functie', array_combine($fx = array_column(rows("SELECT DISTINCT functie FROM angajati WHERE functie IS NOT NULL" . (scope_firma() ? ' AND firma_id=' . scope_firma() : '') . " ORDER BY functie"), 'functie'), $fx), $_GET['functie'] ?? '', 'Toate funcțiile') : '')
+        . ($E['key'] === 'echipamente' ? select_html('cat', ['echipament' => 'Echipamente de muncă', 'stingere' => 'Mijloace de stingere'], $_GET['cat'] ?? '', 'Toate categoriile') : '')
         . '<button class="btn ghost">Filtrează</button>'
         . (can($E, 'write') ? '<a class="btn" href="' . url('form', ['e' => $E['key']] + $extra) . '">+ Adaugă ' . h($E['one']) . '</a>' : '')
         . ($E['key'] === 'angajati' ? '<a class="btn ghost" href="' . url('import') . '">Import Excel/CSV</a>' : '') . '</form>';
@@ -104,6 +111,7 @@ function r_form(array $E, array $data = null, array $errors = []): void {
         $v = $data[$k] ?? ''; $er = $errors[$k] ?? '';
         $in = match ($type) {
             'select' => select_html($k, ($f[3])(), $v, '— alegeți —', $req),
+            'multi' => '<span class="multi">' . implode('', array_map(fn($ok, $ol) => '<label class="chk"><input type="checkbox" name="' . $k . '[]" value="' . h($ok) . '"' . (in_array((string)$ok, is_array($v) ? $v : explode(',', (string)$v)) ? ' checked' : '') . '> ' . h($ol) . '</label>', array_keys(($f[3])()), ($f[3])())) . '</span>',
             'textarea' => '<textarea name="' . $k . '" rows="5"' . ($req ? ' required' : '') . '>' . h($v) . '</textarea>',
             'check' => '<input type="hidden" name="' . $k . '" value="0"><input type="checkbox" name="' . $k . '" value="1"' . ($v ? ' checked' : '') . '>',
             'password' => '<input type="password" name="' . $k . '" autocomplete="new-password">',
@@ -120,12 +128,12 @@ function r_form(array $E, array $data = null, array $errors = []): void {
 }
 function r_save(array $E): void {
     require_role(...$E['write']);
-    $id = (int)($_GET['id'] ?? 0); if ($id) $old = load_scoped($E, $id);
+    $id = (int)($_GET['id'] ?? 0); $old = $id ? load_scoped($E, $id) : [];
     $d = []; $err = [];
     foreach ($E['fields'] as $k => $f) {
-        $v = trim((string)($_POST[$k] ?? '')); $t = $f[1];
+        $t = $f[1]; $v = $t === 'multi' ? implode(',', array_intersect(array_map('strval', (array)($_POST[$k] ?? [])), array_map('strval', array_keys(($f[3])())))) : trim((string)($_POST[$k] ?? ''));
         if ($k === 'firma_id' && scope_firma()) $v = (string)scope_firma();
-        if ($t === 'password') { if ($v !== '') { if (strlen($v) < 8) $err[$k] = 'Parola trebuie să aibă minim 8 caractere.'; else $d['password_hash'] = password_hash($v, PASSWORD_DEFAULT); } elseif (!$id) $err[$k] = 'Parola este obligatorie la un utilizator nou.'; continue; }
+        if ($t === 'password') { if ($v !== '') { if (strlen($v) < 8) $err[$k] = 'Parola trebuie să aibă minim 8 caractere.'; else $d['password_hash'] = password_hash($v, PASSWORD_DEFAULT); } elseif (!$id && $E['key'] === 'users') $err[$k] = 'Parola este obligatorie la un utilizator nou.'; continue; }
         if (!empty($f[2]) && $v === '') { $err[$k] = 'Câmp obligatoriu.'; }
         elseif ($v !== '') {
             if ($t === 'email' && !filter_var($v, FILTER_VALIDATE_EMAIL)) $err[$k] = 'Adresă de e-mail invalidă.';
@@ -139,6 +147,9 @@ function r_save(array $E): void {
     }
     if ($E['key'] === 'angajati' && empty($err['cnp']) && val("SELECT COUNT(*) FROM angajati WHERE cnp=? AND firma_id=? AND id<>?", [$d['cnp'], $d['firma_id'], $id])) $err['cnp'] = 'Există deja un angajat cu acest CNP în firmă.';
     if ($E['key'] === 'users') { if (val("SELECT COUNT(*) FROM users WHERE email=? AND id<>?", [$d['email'], $id])) $err['email'] = 'Utilizatorul există deja.'; if ($d['role'] === 'client' && !$d['firma_id']) $err['firma_id'] = 'Alegeți firma administratorului client.'; }
+    if ($E['key'] === 'angajati' && !empty($d['username']) && val("SELECT COUNT(*) FROM angajati WHERE username=? AND id<>?", [$d['username'], $id])) $err['username'] = 'Utilizatorul există deja.';
+    if ($E['key'] === 'angajati' && !empty($d['password_hash']) && empty($d['username']) && empty($old['username'])) $err['username'] = 'Completați utilizatorul pentru parola de portal.';
+    if ($E['key'] === 'echipamente' && empty($err) && !$d['urmatoarea'] && $d['data_verificare']) $d['urmatoarea'] = add_months($d['data_verificare'], (int)$d['periodicitate_luni']);
     if ($E['key'] === 'grupe' && empty($err['periodicitate_luni']) && ((int)$d['periodicitate_luni'] < 1 || (int)$d['periodicitate_luni'] > 12)) $err['periodicitate_luni'] = 'Între 1 și 12 luni.';
     if ($err) { $_GET['id'] = $id; r_form($E, $_POST, $err); return; }
     if ($E['key'] === 'users') { unset($d['password']); if ($d['role'] !== 'client') $d['firma_id'] = null; }
@@ -186,6 +197,8 @@ function r_angajat(): void {
     page($a['nume'] . ' ' . $a['prenume'], '<div class="tools"><a class="btn" href="' . url('form', ['e' => 'angajati', 'id' => $a['id']]) . '">Editează</a><a class="btn ghost" href="' . url('list', ['e' => 'angajati']) . '">← Înapoi la listă</a></div>
     <div class="cols"><div class="card"><h2>Date angajat</h2><dl class="dl">' . $dl('Firmă', h($f['denumire'])) . $dl('CNP', '<span class="mono">' . mask_cnp($a['cnp']) . '</span>') . $dl('Funcție / COR', h($a['functie'] . ' / ' . $a['cor'])) . $dl('Punct de lucru', h($p['nume'] ?? '—')) . $dl('Grupă', h($g['nume'] ?? '—')) . $dl('Data angajării', fmt_date($a['data_angajarii'])) . $dl('Telefon', h($a['telefon'])) . $dl('Medicina muncii', fmt_date($a['medical_expira']) . ' ' . badge_days(days_until($a['medical_expira']))) . '</dl></div>
     <div class="card"><h2>Acces portal angajat</h2><p>Angajatul intră pe <b>pagina de autentificare → Portal angajat</b> cu codul:</p><p class="code">' . h($a['cod_acces']) . '</p><p class="muted">Codul se comunică personal angajatului. Generați unul nou dacă a fost compromis.</p>' . post_btn(url('regen', ['id' => $a['id']]), 'Generează cod nou', 'ghost', 'Codul vechi nu va mai funcționa. Continuați?') . '</div></div>
+    ' . (is_staff() ? '<div class="card"><h2>Rezultat test offline</h2><form method="post" action="' . url('offline', ['id' => $a['id']]) . '" class="tools">' . csrf_field() . select_html('ins', array_column(array_filter($ins, fn($i) => $i['status'] !== 'semnat'), 'titlu', 'id'), '', '— instruire —', true) . '<input type="number" name="scor" min="0" max="100" placeholder="Scor %" required><button class="btn ghost">Înregistrează</button></form></div>' : '') . '
+    <div class="card p0"><h2 class="pad">Documente <a class="btn sm" href="' . url('documente', ['q' => $a['nume']]) . '">Toate</a></h2><table class="tbl"><tbody>' . (implode('', array_map(fn($d) => '<tr><td>' . h($d['titlu']) . '</td><td>' . fmt_date($d['data_doc']) . '</td><td>' . doc_status_label($d) . '</td><td class="act"><a class="btn sm ghost" href="' . url('doc', ['id' => $d['id']]) . '">Deschide</a></td></tr>', rows("SELECT * FROM documente WHERE angajat_id=? AND sablon_cod IS NOT NULL ORDER BY id DESC", [$a['id']]))) ?: '<tr><td class="empty">Niciun document generat.</td></tr>') . '</tbody></table></div>
     <div class="card p0"><h2 class="pad">Instruiri</h2><table class="tbl"><thead><tr><th>Curs</th><th>Stare</th><th>Scor</th><th>Semnat</th><th>Următoarea instruire</th><th></th></tr></thead><tbody>' . $t . '</tbody></table></div>');
 }
 function r_regen(): void { require_role('superadmin', 'inspector', 'client'); $a = load_scoped(ent('angajati'), (int)$_GET['id']); update('angajati', (int)$a['id'], ['cod_acces' => gen_code()]); flash('Cod de acces nou generat.'); redirect(url('angajat', ['id' => $a['id']])); }
@@ -197,7 +210,7 @@ function r_curs(): void {
     $c = load_scoped(ent('cursuri'), (int)$_GET['id']);
     $L = rows("SELECT * FROM lectii WHERE curs_id=? ORDER BY ordine", [$c['id']]); $Q = rows("SELECT * FROM intrebari WHERE curs_id=? ORDER BY id", [$c['id']]);
     $lh = ''; foreach ($L as $l) $lh .= '<tr><td>' . $l['ordine'] . '</td><td>' . h($l['titlu']) . ($l['video_url'] ? ' <span class="b b-gray">video</span>' : '') . '</td><td class="act"><a class="btn sm" href="' . url('form', ['e' => 'lectii', 'id' => $l['id']]) . '">Editează</a>' . post_btn(url('delete', ['e' => 'lectii', 'id' => $l['id']]), 'Șterge', 'sm danger', 'Ștergeți lecția?') . '</td></tr>';
-    $qh = ''; foreach ($Q as $i => $x) $qh .= '<tr><td>' . ($i + 1) . '</td><td>' . h($x['text']) . '<br><small class="muted">Corect: ' . strtoupper($x['corect']) . ') ' . h($x['opt_' . $x['corect']]) . '</small></td><td class="act"><a class="btn sm" href="' . url('form', ['e' => 'intrebari', 'id' => $x['id']]) . '">Editează</a>' . post_btn(url('delete', ['e' => 'intrebari', 'id' => $x['id']]), 'Șterge', 'sm danger', 'Ștergeți întrebarea?') . '</td></tr>';
+    $qh = ''; foreach ($Q as $i => $x) $qh .= '<tr><td>' . ($i + 1) . '</td><td>' . h($x['text']) . '<br><small class="muted">Corect: ' . h(implode('; ', array_map(fn($o) => strtoupper($o) . ') ' . ($x['opt_' . $o] ?? ''), array_filter(explode(',', (string)$x['corect']))))) . ((int)($x['puncte'] ?? 0) > 1 ? ' · ' . (int)$x['puncte'] . ' puncte' : '') . '</small></td><td class="act"><a class="btn sm" href="' . url('form', ['e' => 'intrebari', 'id' => $x['id']]) . '">Editează</a>' . post_btn(url('delete', ['e' => 'intrebari', 'id' => $x['id']]), 'Șterge', 'sm danger', 'Ștergeți întrebarea?') . '</td></tr>';
     page($c['titlu'], '<div class="tools"><a class="btn" href="' . url('form', ['e' => 'cursuri', 'id' => $c['id']]) . '">Editează cursul</a><a class="btn ghost" href="' . url('list', ['e' => 'cursuri']) . '">← Cursuri</a></div>
     <div class="card"><p>' . h($c['tip']) . ' · ' . (int)$c['durata_min'] . ' minute · prag promovare ' . (int)$c['prag_promovare'] . '%</p><p class="muted">' . h($c['descriere']) . '</p></div>
     <div class="cols"><div class="card p0"><h2 class="pad">Lecții <a class="btn sm" href="' . url('form', ['e' => 'lectii', 'curs_id' => $c['id']]) . '">+ Lecție</a></h2><table class="tbl"><tbody>' . ($lh ?: '<tr><td class="empty">Nicio lecție.</td></tr>') . '</tbody></table></div>
@@ -239,7 +252,15 @@ function r_dashboard(): void {
     $sem = [];
     foreach ($T as $t) { $s = &$sem[$t['firma']]; $s ??= 'green'; if ($t['zile'] !== null && $t['zile'] < 0) $s = 'red'; elseif ($s !== 'red' && ($t['zile'] === null || $t['zile'] <= 30)) $s = 'yellow'; unset($s); }
     $semh = ''; foreach ($sem as $f => $c) $semh .= '<div class="sem"><i class="dot ' . $c . '"></i>' . h($f) . '</div>';
-    page('Centru de termene', '<div class="stats">' . $card('expirat', 'Expirate', 'red') . $card('7', 'Expiră în ≤ 7 zile', 'red') . $card('15', 'Expiră în 8–15 zile', 'orange') . $card('30', 'Expiră în 16–30 zile', 'yellow') . $card('nef', 'Instruiri nefinalizate', 'gray') . '</div>
+    $sfw = scope_firma() ? ' AND a.firma_id=' . scope_firma() : ''; $grp = []; $types = ['Introductiv-generală', 'La locul de muncă', 'Periodică', 'Suplimentară', 'Alte'];
+    foreach (rows("SELECT c.tip, c.domeniu, i.status, i.urmatoarea FROM instruiri i JOIN cursuri c ON c.id=i.curs_id JOIN angajati a ON a.id=i.angajat_id WHERE a.activ=1$sfw") as $r) {
+        $due = $r['status'] !== 'semnat' || ($r['urmatoarea'] && $r['urmatoarea'] <= today()); if (!$due) continue;
+        $d = ($r['domeniu'] === 'SU' || $r['tip'] === 'SU / PSI') ? 'PSI / SU' : 'SSM'; $t = in_array($r['tip'], $types) ? $r['tip'] : 'Alte'; $grp[$d][$t] = ($grp[$d][$t] ?? 0) + 1; }
+    $gt = ''; foreach (['SSM', 'PSI / SU'] as $d) { $gt .= '<tr><th>' . $d . '</th>'; foreach ($types as $t) $gt .= '<td class="c">' . (($n = $grp[$d][$t] ?? 0) ? '<b>' . $n . '</b>' : '<span class="muted">0</span>') . '</td>'; $gt .= '</tr>'; }
+    $ndoc = (int)val("SELECT COUNT(*) FROM documente d WHERE d.sablon_cod IS NOT NULL AND d.status<>'finalizat'" . (scope_firma() ? ' AND d.firma_id=' . scope_firma() : ''));
+    $neq = (int)val("SELECT COUNT(*) FROM echipamente e WHERE e.urmatoarea IS NOT NULL AND e.urmatoarea<=?" . (scope_firma() ? ' AND e.firma_id=' . scope_firma() : ''), [date('Y-m-d', strtotime('+30 days'))]);
+    $today = '<div class="card"><h2>De efectuat azi <span class="help" title="Instruiri alocate și nefinalizate sau instruiri periodice ajunse la termen, grupate pe tipul instruirii. Detaliile sunt în tabelul de mai jos.">?</span></h2><table class="tbl mini"><thead><tr><th></th>' . implode('', array_map(fn($t) => '<th>' . $t . '</th>', $types)) . '</tr></thead><tbody>' . $gt . '</tbody></table><div class="tools"><a class="btn sm ghost" href="' . url('documente', ['st' => 'de_semnat']) . '">📄 ' . $ndoc . ' documente nefinalizate</a><a class="btn sm ghost" href="' . url('rapoarte', ['tip' => 'echipamente']) . '">🧯 ' . $neq . ' verificări echipamente în ≤30 zile</a></div></div>';
+    page('Centru de termene', $today . '<div class="stats">' . $card('expirat', 'Expirate', 'red') . $card('7', 'Expiră în ≤ 7 zile', 'red') . $card('15', 'Expiră în 8–15 zile', 'orange') . $card('30', 'Expiră în 16–30 zile', 'yellow') . $card('nef', 'Instruiri nefinalizate', 'gray') . '</div>
     <div class="card"><h2>Semafor conformitate pe firme</h2>' . ($semh ?: '<p class="muted">Nicio firmă cu angajați.</p>') . '</div>
     <div class="tools"><a class="btn ghost sm" href="' . url('dashboard', ['f' => 'urgent']) . '">Toate urgențele (≤30 zile)</a><a class="btn ghost sm" href="' . url('dashboard', ['f' => 'toate']) . '">Toate termenele</a><a class="btn ghost sm" href="' . url('rapoarte', ['tip' => 'termene']) . '">Raport termene</a></div>
     <div class="card p0"><table class="tbl"><thead><tr><th>Termen</th><th>Tip</th><th>Angajat</th><th>Firmă</th><th>Detalii</th><th>Data</th></tr></thead><tbody>' . $rowsh . '</tbody></table></div>');
@@ -308,15 +329,6 @@ function r_import(bool $post): void {
 }
 
 /* ---------- documente + fișa individuală ---------- */
-function r_documente(): void {
-    require_role('superadmin', 'inspector', 'client');
-    $sf = scope_firma() ?? ((int)($_GET['firma'] ?? 0) ?: null);
-    $D = rows("SELECT d.*, a.nume, a.prenume, f.denumire FROM documente d JOIN angajati a ON a.id=d.angajat_id JOIN firme f ON f.id=d.firma_id" . ($sf ? ' WHERE d.firma_id=' . $sf : '') . " ORDER BY d.id DESC");
-    $t = ''; foreach ($D as $d) $t .= '<tr><td data-l="Data">' . h(fmt_date($d['created_at'])) . '</td><td data-l="Tip">' . h($d['tip']) . '</td><td data-l="Document">' . h($d['titlu']) . '</td><td data-l="Angajat">' . h($d['nume'] . ' ' . $d['prenume']) . '</td><td data-l="Firmă">' . h($d['denumire']) . '</td><td class="act"><a class="btn sm" href="' . url('fisa', ['id' => $d['instruire_id']]) . '">Deschide / PDF</a></td></tr>';
-    if (!$t) $t = '<tr><td colspan="9" class="empty">Încă nu există documente semnate.</td></tr>';
-    $flt = scope_firma() ? '' : '<form class="tools" method="get"><input type="hidden" name="r" value="documente">' . select_html('firma', opts("SELECT id, denumire AS l FROM firme", false), $_GET['firma'] ?? '', 'Toate firmele') . '<button class="btn ghost">Filtrează</button></form>';
-    page('Arhivă documente', $flt . '<div class="card p0"><table class="tbl"><thead><tr><th>Data</th><th>Tip</th><th>Document</th><th>Angajat</th><th>Firmă</th><th></th></tr></thead><tbody>' . $t . '</tbody></table></div>');
-}
 function r_fisa(): void {
     $i = row("SELECT * FROM instruiri WHERE id=?", [(int)$_GET['id']]);
     if (!$i) { page('Negăsit', '<div class="card">Fișa nu există.</div>'); return; }
@@ -344,22 +356,27 @@ function r_fisa(): void {
 /* ---------- rapoarte ---------- */
 function r_rapoarte(): void {
     require_role('superadmin', 'inspector', 'client');
-    $tip = $_GET['tip'] ?? 'stadiu'; $sf = scope_firma() ?? ((int)($_GET['firma'] ?? 0) ?: null); $w = $sf ? ' WHERE a.firma_id=' . $sf : '';
-    if ($tip === 'angajati') { $hdr = ['Firmă', 'Nume', 'Prenume', 'CNP', 'Funcție', 'Grupă', 'Data angajării', 'Medicina muncii până la'];
+    $tip = $_GET['tip'] ?? 'stadiu'; $sf = scope_firma() ?? ((int)($_GET['firma'] ?? 0) ?: null); $pct = (int)($_GET['punct'] ?? 0) ?: null;
+    $w = ($sf || $pct) ? ' WHERE ' . implode(' AND ', array_filter([$sf ? 'a.firma_id=' . $sf : '', $pct ? 'a.punct_id=' . $pct : ''])) : '';
+    if ($x = report_ext($tip, $sf, $pct)) { [$hdr, $data] = $x; }
+    elseif ($tip === 'angajati') { $hdr = ['Firmă', 'Nume', 'Prenume', 'CNP', 'Funcție', 'Grupă', 'Data angajării', 'Medicina muncii până la'];
         $data = array_map(fn($r) => [$r['denumire'], $r['nume'], $r['prenume'], mask_cnp($r['cnp']), $r['functie'], $r['grupa'], fmt_date($r['data_angajarii']), fmt_date($r['medical_expira'])], rows("SELECT a.*, f.denumire, g.nume AS grupa FROM angajati a JOIN firme f ON f.id=a.firma_id LEFT JOIN grupe g ON g.id=a.grupa_id$w ORDER BY f.denumire, a.nume"));
     } elseif ($tip === 'termene') { $hdr = ['Zile rămase', 'Tip', 'Angajat', 'Firmă', 'Detalii', 'Data'];
         $data = array_map(fn($t) => [$t['zile'] === null ? 'nefinalizat' : $t['zile'], $t['tip'], $t['angajat'], $t['firma'], $t['ce'], fmt_date($t['data'])], termene($sf));
+    } elseif ($tip === 'situatie') { $hdr = ['Firmă', 'Angajat', 'Curs', 'Tip', 'Stare', 'Scor', 'Data testării', 'Data semnării'];
+        $data = array_map(fn($r) => [$r['denumire'], $r['nume'] . ' ' . $r['prenume'], $r['titlu'], $r['tip'], strip_tags(status_badge($r['status'])), $r['scor'] !== null ? $r['scor'] . '%' : '', $r['data_test'] ? date('d.m.Y', strtotime($r['data_test'])) : '', fmt_date($r['data_semnare'])], rows("SELECT i.*, a.nume, a.prenume, f.denumire, c.titlu, c.tip FROM instruiri i JOIN angajati a ON a.id=i.angajat_id JOIN firme f ON f.id=a.firma_id JOIN cursuri c ON c.id=i.curs_id$w ORDER BY i.data_test DESC"));
     } else { $tip = 'stadiu'; $hdr = ['Firmă', 'Angajat', 'Curs', 'Stare', 'Scor', 'Data semnării', 'Următoarea'];
         $data = array_map(fn($r) => [$r['denumire'], $r['nume'] . ' ' . $r['prenume'], $r['titlu'], strip_tags(status_badge($r['status'])), $r['scor'] !== null ? $r['scor'] . '%' : '', fmt_date($r['data_semnare']), fmt_date($r['urmatoarea'])], rows("SELECT i.*, a.nume, a.prenume, f.denumire, c.titlu FROM instruiri i JOIN angajati a ON a.id=i.angajat_id JOIN firme f ON f.id=a.firma_id JOIN cursuri c ON c.id=i.curs_id$w ORDER BY f.denumire, a.nume"));
     }
     if (!empty($_GET['csv'])) { header('Content-Type: text/csv; charset=utf-8'); header("Content-Disposition: attachment; filename=\"raport_$tip.csv\""); echo "\xEF\xBB\xBF"; $o = fopen('php://output', 'w'); fputcsv($o, $hdr, ';', '"', ''); foreach ($data as $d) fputcsv($o, $d, ';', '"', ''); exit; }
-    $names = ['stadiu' => 'Stadiu instruire', 'angajati' => 'Listă angajați', 'termene' => 'Termene'];
-    $tabs = ''; foreach ($names as $k => $l) $tabs .= '<a class="btn ' . ($k === $tip ? '' : 'ghost') . '" href="' . url('rapoarte', ['tip' => $k] + ($sf && !scope_firma() ? ['firma' => $sf] : [])) . '">' . $l . '</a>';
+    $names = ['stadiu' => 'Stadiu instruire', 'situatie' => 'Situație instruiri / testare', 'plan_lunar' => 'Planificare lunară', 'plan_anual' => 'Planificare anuală', 'grafic' => 'Grafic instruire', 'istoric' => 'Istoric instruiri', 'angajati' => 'Listă angajați', 'meserii' => 'Meserii autorizate', 'echipe' => 'Echipe intervenție / evacuare', 'medicina' => 'Medicina muncii', 'echipamente' => 'Echipamente de muncă', 'stingere' => 'Mijloace de stingere', 'audit' => 'Audit SSM / PSI', 'neconf' => 'Neconformități audit', 'termene' => 'Termene'];
+    if (!isset($names[$tip])) $tip = 'stadiu';
+    $tabs = ''; foreach ($names as $k => $l) $tabs .= '<a class="btn sm ' . ($k === $tip ? '' : 'ghost') . '" href="' . url('rapoarte', ['tip' => $k] + ($sf && !scope_firma() ? ['firma' => $sf] : []) + ($pct ? ['punct' => $pct] : [])) . '">' . $l . '</a>';
     $th = implode('', array_map(fn($x) => '<th>' . h($x) . '</th>', $hdr)); $tb = '';
     foreach ($data as $d) { $tb .= '<tr>'; foreach ($d as $j => $x) $tb .= '<td data-l="' . h($hdr[$j]) . '">' . h($x) . '</td>'; $tb .= '</tr>'; }
     if (!$data) $tb = '<tr><td colspan="99" class="empty">Nu există date.</td></tr>';
-    $flt = scope_firma() ? '' : '<form class="tools" method="get"><input type="hidden" name="r" value="rapoarte"><input type="hidden" name="tip" value="' . $tip . '">' . select_html('firma', opts("SELECT id, denumire AS l FROM firme", false), $sf ?? '', 'Toate firmele') . '<button class="btn ghost">Filtrează</button></form>';
-    page('Rapoarte', '<div class="tools noprint">' . $tabs . '</div>' . $flt . '<div class="tools noprint"><a class="btn ghost" href="' . url('rapoarte', ['tip' => $tip, 'csv' => 1] + ($sf ? ['firma' => $sf] : [])) . '">Export Excel (CSV)</a><button class="btn ghost" onclick="window.print()">Tipărește / PDF</button></div><div class="card p0"><h2 class="pad">' . $names[$tip] . ' – ' . date('d.m.Y') . '</h2><table class="tbl"><thead><tr>' . $th . '</tr></thead><tbody>' . $tb . '</tbody></table></div>');
+    $flt = '<form class="tools noprint" method="get"><input type="hidden" name="r" value="rapoarte"><input type="hidden" name="tip" value="' . $tip . '">' . (scope_firma() ? '' : select_html('firma', opts("SELECT id, denumire AS l FROM firme", false), $sf ?? '', 'Toate firmele')) . select_html('punct', opts("SELECT id, nume AS l FROM puncte" . ($sf ? ' WHERE firma_id=' . $sf : ''), false), $pct ?? '', 'Toate punctele de lucru') . ($tip === 'plan_lunar' ? select_html('luna', luni_ro(), $_GET['luna'] ?? date('n'), 'Luna') : '') . '<button class="btn ghost">Filtrează</button></form>';
+    page('Rapoarte', '<div class="tools noprint">' . $tabs . '</div>' . $flt . '<div class="tools noprint"><a class="btn ghost" href="' . url('rapoarte', ['tip' => $tip, 'csv' => 1] + ($sf ? ['firma' => $sf] : []) + ($pct ? ['punct' => $pct] : []) + (isset($_GET['luna']) ? ['luna' => (int)$_GET['luna']] : [])) . '">Export Excel (CSV)</a><button class="btn ghost" onclick="window.print()">Tipărește / PDF</button></div><div class="card p0"><h2 class="pad">' . $names[$tip] . ' – ' . date('d.m.Y') . '</h2><table class="tbl"><thead><tr>' . $th . '</tr></thead><tbody>' . $tb . '</tbody></table></div>');
 }
 
 /* ---------- portal angajat ---------- */
@@ -379,7 +396,13 @@ function r_portal(): void {
         $h .= '<div class="card task"><div><h3>' . h($i['titlu']) . '</h3><p class="muted">' . (int)$i['durata_min'] . ' minute · ' . status_badge($i['status']) . ($i['urmatoarea'] ? ' · următoarea: ' . fmt_date($i['urmatoarea']) : '') . '</p></div>' . $btn . '</div>';
     }
     if (!$h) $h = '<div class="card">Nu aveți instruiri alocate.</div>';
-    page('Bună, ' . $a['prenume'] . '!', '<div class="card"><dl class="dl"><div><dt>Aviz medicina muncii</dt><dd>' . fmt_date($a['medical_expira']) . ' ' . badge_days(days_until($a['medical_expira'])) . '</dd></div><div><dt>Funcție</dt><dd>' . h($a['functie']) . '</dd></div></dl></div><h2>Instruirile mele</h2>' . $h);
+    $T = docs_to_sign(); $ds = '';
+    if ($T) { $ds = '<div class="card"><h2>Documente de semnat (' . count($T) . ') <a class="btn" href="' . url('semneaza') . '">Semnează toate</a></h2><table class="tbl"><tbody>';
+        foreach ($T as $d) { $an = $d['angajat_id'] && (int)$d['angajat_id'] !== (int)$a['id'] ? row("SELECT nume, prenume FROM angajati WHERE id=?", [$d['angajat_id']]) : null; $ds .= '<tr><td>' . h($d['titlu']) . ($an ? ' – ' . h($an['nume'] . ' ' . $an['prenume']) : '') . '</td><td><span class="b b-gray">ca ' . $d['ca'] . '</span></td><td class="act"><a class="btn sm ghost" href="' . url('doc', ['id' => $d['id']]) . '">Citește</a><a class="btn sm" href="' . url('semneaza', ['ids' => [$d['id']]]) . '">Semnează</a></td></tr>'; }
+        $ds .= '</tbody></table></div>'; }
+    $mine = rows("SELECT * FROM documente WHERE angajat_id=? AND sablon_cod IS NOT NULL ORDER BY id DESC", [$a['id']]);
+    $dm = $mine ? '<h2>Documentele mele</h2><div class="card p0"><table class="tbl"><tbody>' . implode('', array_map(fn($d) => '<tr><td>' . h($d['titlu']) . '</td><td>' . fmt_date($d['data_doc']) . '</td><td>' . doc_status_label($d) . '</td><td class="act"><a class="btn sm ghost" href="' . url('doc', ['id' => $d['id']]) . '">Deschide / PDF</a></td></tr>', $mine)) . '</tbody></table></div>' : '';
+    page('Bună, ' . $a['prenume'] . '!', '<div class="card"><dl class="dl"><div><dt>Aviz medicina muncii</dt><dd>' . fmt_date($a['medical_expira']) . ' ' . badge_days(days_until($a['medical_expira'])) . '</dd></div><div><dt>Funcție</dt><dd>' . h($a['functie']) . '</dd></div></dl></div>' . $ds . '<h2>Instruirile mele</h2>' . $h . $dm);
 }
 function r_take(): void {
     $i = my_ins((int)$_GET['id']);
@@ -396,18 +419,29 @@ function r_take(): void {
         $v = ''; if ($l['video_url']) $v = preg_match('/\.mp4($|\?)/', $l['video_url']) ? '<video controls src="' . h($l['video_url']) . '"></video>' : '<div class="video"><iframe src="' . h($l['video_url']) . '" allowfullscreen loading="lazy"></iframe></div>';
         $lh .= '<details class="card lesson"' . ($n === 0 ? ' open' : '') . '><summary>Lecția ' . (int)$l['ordine'] . ': ' . h($l['titlu']) . '</summary><div class="txt">' . nl2br(h($l['continut'])) . '</div>' . $v . '</details>';
     }
+    $c = row("SELECT * FROM cursuri WHERE id=?", [$i['curs_id']]);
+    if (($c['mod_test'] ?? '') === 'offline') { page($i['titlu'], $lh . '<div class="card"><p>Testul pentru această instruire se susține <b>pe hârtie</b>. După ce inspectorul înregistrează rezultatul, veți putea semna fișa aici.</p></div>'); return; }
+    if ((int)$c['nr_intrebari'] > 0 && count($Q) > (int)$c['nr_intrebari']) { shuffle($Q); $Q = array_slice($Q, 0, (int)$c['nr_intrebari']); }
+    $_SESSION['test_' . $i['id']] = array_column($Q, 'id');
     $qh = '';
-    foreach ($Q as $n => $q) { $qh .= '<fieldset class="q"><legend>' . ($n + 1) . '. ' . h($q['text']) . '</legend>'; foreach (['a', 'b', 'c'] as $o) $qh .= '<label class="opt"><input type="radio" name="q' . $q['id'] . '" value="' . $o . '" required> ' . h($q['opt_' . $o]) . '</label>'; $qh .= '</fieldset>'; }
+    foreach ($Q as $n => $q) { $multi = str_contains((string)$q['corect'], ','); $qh .= '<fieldset class="q"><legend>' . ($n + 1) . '. ' . h($q['text']) . ($multi ? ' <small class="muted">(mai multe răspunsuri corecte)</small>' : '') . '</legend>';
+        foreach (['a', 'b', 'c', 'd'] as $o) if (trim((string)($q['opt_' . $o] ?? '')) !== '') $qh .= '<label class="opt"><input type="' . ($multi ? 'checkbox' : 'radio') . '" name="q' . $q['id'] . '[]" value="' . $o . '"' . ($multi ? '' : ' required') . '> ' . h($q['opt_' . $o]) . '</label>'; $qh .= '</fieldset>'; }
+    $timer = (int)$c['timp_test_min'] > 0 ? '<div class="timer" data-min="' . (int)$c['timp_test_min'] . '">⏱ <span></span></div>' : '';
     $warn = $i['status'] === 'picat' ? '<div class="flash err">Data trecută ați obținut ' . (int)$i['scor'] . '%. Recitiți lecțiile și reluați testul (prag: ' . (int)$i['prag_promovare'] . '%).</div>' : '';
-    page($i['titlu'], $warn . '<p class="muted">Parcurgeți lecțiile, apoi răspundeți la test. Prag de promovare: ' . (int)$i['prag_promovare'] . '%.</p>' . $lh . '<h2>Test</h2><form method="post" action="' . url('submit_test', ['id' => $i['id']]) . '" class="card">' . csrf_field() . $qh . '<div class="savebar"><button class="btn">Trimite răspunsurile</button></div></form>');
+    page($i['titlu'], $warn . '<p class="muted">Parcurgeți lecțiile, apoi răspundeți la test. Prag de promovare: ' . (int)$i['prag_promovare'] . '%.</p>' . $lh . '<h2>Test</h2>' . $timer . '<form method="post" action="' . url('submit_test', ['id' => $i['id']]) . '" class="card" id="testform">' . csrf_field() . $qh . '<div class="savebar"><button class="btn">Trimite răspunsurile</button></div></form>');
 }
 function r_submit_test(): void {
     $i = my_ins((int)$_GET['id']);
     if (!in_array($i['status'], ['alocat', 'picat'])) redirect(url('take', ['id' => $i['id']]));
-    $Q = rows("SELECT * FROM intrebari WHERE curs_id=?", [$i['curs_id']]); $ok = 0;
-    foreach ($Q as $q) if (($_POST['q' . $q['id']] ?? '') === $q['corect']) $ok++;
-    $scor = $Q ? (int)round($ok * 100 / count($Q)) : 100; $pass = $scor >= (int)$i['prag_promovare'];
+    $ids = $_SESSION['test_' . $i['id']] ?? null;
+    $Q = array_values(array_filter(rows("SELECT * FROM intrebari WHERE curs_id=? ORDER BY id", [$i['curs_id']]), fn($q) => !$ids || in_array($q['id'], $ids)));
+    $ok = 0; $pts = 0; $max = 0; $det = [];
+    foreach ($Q as $q) { $corr = array_filter(explode(',', (string)$q['corect'])); sort($corr); $ans = array_map('strval', (array)($_POST['q' . $q['id']] ?? [])); sort($ans);
+        $w = max(1, (int)($q['puncte'] ?? 1)); $max += $w; $good = $ans === $corr; if ($good) { $ok++; $pts += $w; }
+        $det[] = [$q['text'], strtoupper(implode(',', $ans)) ?: '—', $good]; }
+    $scor = $max ? (int)round($pts * 100 / $max) : 100; $pass = $scor >= (int)$i['prag_promovare'];
     update('instruiri', (int)$i['id'], ['scor' => $scor, 'status' => $pass ? 'promovat' : 'picat', 'data_test' => date('Y-m-d H:i')]);
+    $_SESSION['test_res_' . $i['id']] = ['nr' => count($Q), 'puncte' => $pts, 'max' => $max, 'raspunsuri' => $det]; unset($_SESSION['test_' . $i['id']]);
     flash($pass ? "Felicitări! Ați răspuns corect la $ok din " . count($Q) . " întrebări ($scor%)." : "Ați răspuns corect la $ok din " . count($Q) . " ($scor%). Nu ați atins pragul – reluați testul.", $pass ? 'ok' : 'err');
     redirect(url('take', ['id' => $i['id']]));
 }
@@ -418,8 +452,21 @@ function r_sign(): void {
     if (!str_starts_with($sig, 'data:image/png;base64,') || strlen($sig) > 600000 || strlen($sig) < 1500 || empty($_POST['decl'])) { flash('Desenați semnătura și bifați declarația.', 'err'); redirect(url('take', ['id' => $i['id']])); }
     $per = (int)($i['program_id'] ? val("SELECT periodicitate_luni FROM program WHERE id=?", [$i['program_id']]) : 0) ?: (int)(val("SELECT g.periodicitate_luni FROM angajati a JOIN grupe g ON g.id=a.grupa_id WHERE a.id=?", [$i['angajat_id']]) ?: 12);
     update('instruiri', (int)$i['id'], ['status' => 'semnat', 'semnatura' => $sig, 'data_semnare' => date('Y-m-d H:i'), 'urmatoarea' => add_months(today(), $per)]);
-    $a = row("SELECT * FROM angajati WHERE id=?", [$i['angajat_id']]);
-    insert('documente', ['firma_id' => $a['firma_id'], 'angajat_id' => $a['id'], 'instruire_id' => $i['id'], 'tip' => 'Fișă individuală de instructaj', 'titlu' => 'Fișă instructaj – ' . $i['titlu'], 'created_at' => date('Y-m-d H:i')]);
-    flash('Fișa a fost semnată și arhivată.');
-    redirect(url('fisa', ['id' => $i['id']]));
+    $a = row("SELECT * FROM angajati WHERE id=?", [$i['angajat_id']]); $c = row("SELECT * FROM cursuri WHERE id=?", [$i['curs_id']]);
+    $su = ($c['domeniu'] ?? '') === 'SU' || $c['tip'] === 'SU / PSI'; $pfx = $su ? 'SU' : 'SSM';
+    $cod = $pfx . '-FIS-' . (in_array($c['tip'], ['Introductiv-generală', 'La locul de muncă']) ? 'ANG' : ($c['tip'] === 'Suplimentară' && !$su ? 'SUP' : 'PER'));
+    $instr = $i['program_id'] ? (string)val("SELECT instructor FROM program WHERE id=?", [$i['program_id']]) : '';
+    $now = date('Y-m-d H:i'); $res = $_SESSION['test_res_' . $i['id']] ?? [];
+    $did = doc_generate($cod, (int)$a['firma_id'], null, (int)$a['id'], today(), $instr, (int)$i['id']); update('documente', $did, ['semn_ang' => $sig, 'semn_ang_data' => $now]); doc_refresh_status($did);
+    if (!empty($c['emite_fisa16'])) { $tid = doc_generate($pfx . '-TEST', (int)$a['firma_id'], null, (int)$a['id'], today(), $instr, (int)$i['id'], ['instruire' => $res]); update('documente', $tid, ['semn_ang' => $sig, 'semn_ang_data' => $now]); doc_refresh_status($tid); }
+    flash('Fișa a fost semnată. Urmează semnătura conducătorului locului de muncă.');
+    redirect(url('doc', ['id' => $did]));
+}
+
+function r_offline(): void {
+    require_role('superadmin', 'inspector'); $a = load_scoped(ent('angajati'), (int)$_GET['id']);
+    $i = row("SELECT i.*, c.prag_promovare FROM instruiri i JOIN cursuri c ON c.id=i.curs_id WHERE i.id=? AND i.angajat_id=? AND i.status<>'semnat'", [(int)($_POST['ins'] ?? 0), $a['id']]);
+    $sc = max(0, min(100, (int)($_POST['scor'] ?? 0)));
+    if ($i) { update('instruiri', (int)$i['id'], ['scor' => $sc, 'status' => $sc >= (int)$i['prag_promovare'] ? 'promovat' : 'picat', 'data_test' => date('Y-m-d H:i')]); flash('Rezultat înregistrat. Dacă e promovat, angajatul semnează fișa în portal.'); }
+    redirect(url('angajat', ['id' => $a['id']]));
 }

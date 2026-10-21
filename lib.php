@@ -77,9 +77,9 @@ function nav(): string {
     $u = user(); if (!$u) return '';
     $cur = $_GET['r'] ?? 'dashboard';
     $items = match ($u['role']) {
-        'angajat' => ['portal' => 'Instruirile mele'],
-        'client' => ['dashboard' => 'Centru de termene', 'list&e=angajati' => 'Angajați', 'list&e=puncte' => 'Puncte de lucru', 'import' => 'Import', 'documente' => 'Documente', 'rapoarte' => 'Rapoarte'],
-        default => ['dashboard' => 'Centru de termene', 'list&e=firme' => 'Firme', 'list&e=puncte' => 'Puncte de lucru', 'list&e=angajati' => 'Angajați', 'list&e=grupe' => 'Grupe', 'list&e=program' => 'Program instruire', 'list&e=cursuri' => 'Cursuri & teste', 'documente' => 'Documente', 'rapoarte' => 'Rapoarte'] + ($u['role'] === 'superadmin' ? ['list&e=users' => 'Utilizatori'] : []),
+        'angajat' => ['portal' => 'Instruirile mele', 'semneaza' => 'De semnat', 'mesaje' => 'Mesaje', 'chat' => 'Chat', 'tichete' => 'Suport'],
+        'client' => ['dashboard' => 'Centru de termene', 'list&e=angajati' => 'Angajați', 'list&e=puncte' => 'Puncte de lucru', 'list&e=echipamente' => 'Echipamente', 'import' => 'Import', 'documente' => 'Documente', 'rapoarte' => 'Rapoarte', 'mesaje' => 'Mesaje', 'chat' => 'Chat', 'tichete' => 'Suport'],
+        default => ['dashboard' => 'Centru de termene', 'list&e=firme' => 'Firme', 'list&e=puncte' => 'Puncte de lucru', 'list&e=angajati' => 'Angajați', 'list&e=grupe' => 'Grupe', 'list&e=program' => 'Program instruire', 'list&e=categorii' => 'Categorii', 'list&e=cursuri' => 'Cursuri & teste', 'list&e=sabloane' => 'Șabloane', 'documente' => 'Documente', 'list&e=echipamente' => 'Echipamente', 'list&e=audituri' => 'Audit', 'list&e=neconformitati' => 'Neconformități', 'rapoarte' => 'Rapoarte', 'mesaje' => 'Mesaje', 'chat' => 'Chat', 'tichete' => 'Tichete'] + ($u['role'] === 'superadmin' ? ['list&e=users' => 'Utilizatori'] : []),
     };
     $h = '';
     foreach ($items as $k => $l) {
@@ -94,7 +94,8 @@ function page(string $title, string $body): void {
     foreach ($_SESSION['flash'] ?? [] as [$t, $m]) $fl .= "<div class=\"flash $t\">" . h($m) . "</div>";
     unset($_SESSION['flash']);
     $roles = ['superadmin' => 'Super-admin', 'inspector' => 'Inspector SSM', 'client' => 'Administrator client', 'angajat' => 'Angajat'];
-    $userbox = $u ? '<div class="who"><span>' . h($u['name']) . ' · ' . $roles[$u['role']] . '</span><form method="post" action="' . url('logout') . '">' . csrf_field() . '<button class="btn sm ghost">Ieșire</button></form></div>' : '';
+    $bc = $u ? bell_count() : 0;
+    $userbox = $u ? '<div class="who"><a class="bell" href="' . url($u['role'] === 'angajat' && docs_to_sign() ? 'semneaza' : 'mesaje') . '" title="Notificări">🔔' . ($bc ? '<i>' . $bc . '</i>' : '') . '</a><span>' . h($u['name']) . ' · ' . $roles[$u['role']] . '</span><form method="post" action="' . url('logout') . '">' . csrf_field() . '<button class="btn sm ghost">Ieșire</button></form></div>' : '';
     echo '<!doctype html><html lang="ro"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' . h($title) . ' · BENIAL CONSULTING</title><link rel="stylesheet" href="style.css"><link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#0f172a"><link rel="icon" href="icons/icon-192.png"><link rel="apple-touch-icon" href="icons/apple-touch-icon.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="BENIAL"></head><body>';
     echo '<header class="top"><a class="logo" href="?"><span class="mark">B</span><span><b>BENIAL</b> CONSULTING<small>SSM · PSI · Situații de urgență</small></span></a>' . $userbox . '</header>';
     if ($u) echo '<nav class="nav">' . nav() . '</nav>';
